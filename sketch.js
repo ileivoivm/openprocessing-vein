@@ -48,8 +48,8 @@ function veinRandomizeSliders() {
   VEIN_LAB.leafLen = veinRandStep(0.05, 5, 0.05);
   VEIN_LAB.leafWid = veinRandStep(1, 3, 0.05);
   VEIN_LAB.leafDens = veinRandStep(1, 2, 0.05);
-  VEIN_LAB.leafSw = veinRandStep(1, 4, 0.05);
-  VEIN_LAB.lineSw = veinRandStep(1, 4, 0.05);
+  VEIN_LAB.leafSw = veinRandStep(1, 6, 0.05);
+  VEIN_LAB.lineSw = veinRandStep(1, 6, 0.05);
   VEIN_LAB.leafVein = veinRandStep(0, 1, 0.01);
   VEIN_LAB.leafTri = veinRandStep(0, 1, 0.01);
   VEIN_LAB.leafOff = veinRandStep(-1, 1, 0.01);
@@ -70,8 +70,8 @@ function veinApplyPreset(o) {
   if (o.leafPad != null) VEIN_LAB.leafPad = veinClamp(o.leafPad, 0, 1, 1);
   if (o.leafDens != null) VEIN_LAB.leafDens = veinClamp(o.leafDens, 1, 2, 1);
   if (o.leafOff != null) VEIN_LAB.leafOff = veinClamp(o.leafOff, -1, 1, 0);
-  if (o.leafSw != null) VEIN_LAB.leafSw = veinClamp(o.leafSw, 1, 4, 1);
-  if (o.lineSw != null) VEIN_LAB.lineSw = veinClamp(o.lineSw, 1, 4, 1);
+  if (o.leafSw != null) VEIN_LAB.leafSw = veinClamp(o.leafSw, 1, 6, 1);
+  if (o.lineSw != null) VEIN_LAB.lineSw = veinClamp(o.lineSw, 1, 6, 1);
   if (typeof o.showPath === "boolean") VEIN_LAB.showPath = o.showPath;
   if (typeof o.randFx === "boolean") VEIN_LAB.randFx = o.randFx;
   return true;
@@ -255,8 +255,8 @@ function veinSanitizeStrokeOpts(raw, index) {
     leafPad: veinClamp(raw.leafPad, 0, 1, VEIN_LAB.leafPad),
     leafDens: veinClamp(raw.leafDens, 1, 2, VEIN_LAB.leafDens),
     leafOff: veinClamp(raw.leafOff, -1, 1, VEIN_LAB.leafOff),
-    leafSw: veinClamp(raw.leafSw, 1, 4, VEIN_LAB.leafSw),
-    lineSw: veinClamp(raw.lineSw, 1, 4, VEIN_LAB.lineSw || 1),
+    leafSw: veinClamp(raw.leafSw, 1, 6, VEIN_LAB.leafSw),
+    lineSw: veinClamp(raw.lineSw, 1, 6, VEIN_LAB.lineSw || 1),
     salt: Number.isFinite(saltN) ? saltN : 9.1 + index * 1.37,
   };
 }
@@ -647,7 +647,7 @@ function wireVeinFloatUi() {
     swEl.value = String(VEIN_LAB.leafSw);
     if (swV) swV.textContent = Number(VEIN_LAB.leafSw).toFixed(2);
     const applySw = () => {
-      VEIN_LAB.leafSw = constrain(Number(swEl.value), 1, 4);
+      VEIN_LAB.leafSw = constrain(Number(swEl.value), 1, 6);
       if (swV) swV.textContent = Number(VEIN_LAB.leafSw).toFixed(2);
       veinSaveLs();
       redraw();
@@ -662,7 +662,7 @@ function wireVeinFloatUi() {
     lineSwEl.value = String(VEIN_LAB.lineSw);
     if (lineSwV) lineSwV.textContent = Number(VEIN_LAB.lineSw).toFixed(2);
     const applyLineSw = () => {
-      VEIN_LAB.lineSw = constrain(Number(lineSwEl.value), 1, 4);
+      VEIN_LAB.lineSw = constrain(Number(lineSwEl.value), 1, 6);
       if (lineSwV) lineSwV.textContent = Number(VEIN_LAB.lineSw).toFixed(2);
       veinSaveLs();
       redraw();

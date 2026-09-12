@@ -21,50 +21,98 @@
         </button>
       </div>
       <div class="float-body">
-        <p class="note">
-          沿 asemic 橢圓弧路徑跑 <code>MixVein.paint</code>。新種子／Space
-          重抽 · S 存 · U 面板
-        </p>
-        <h2>節奏</h2>
-        <table>
-          <tbody>
-            <tr>
-              <th>線</th>
-              <td class="api">----</td>
-              <td>實線＋Perlin 法向左右抖</td>
-            </tr>
-            <tr>
-              <th>葉</th>
-              <td class="api">A／AA</td>
-              <td>間距忽近忽遠；缺口補線</td>
-            </tr>
-            <tr>
-              <th>小葉</th>
-              <td class="api">curve／三角</td>
-              <td>葉緣曲線或兩直線；滑桿可改葉脈</td>
-            </tr>
-          </tbody>
-        </table>
         <h2>造型路徑</h2>
-        <div class="togs vein-path-row">
-          <label class="tog">
-            <input id="lab-path" type="checkbox" />
-            顯示造型路徑
+        <div class="layout-slides">
+          <label class="slide">
+            <span>grid</span>
+            <input
+              id="lab-grid"
+              type="range"
+              min="0"
+              max="1"
+              step="0.01"
+              value="1"
+            />
+            <span class="val" id="lab-grid-v">1.00</span>
           </label>
-          <div class="vein-path-actions">
-            <button type="button" class="icon" id="lab-copy" title="複製參數 JSON">
-              複製
-            </button>
-            <button type="button" class="icon" id="lab-load" title="載入參數 JSON">
-              Load
-            </button>
+          <label class="slide">
+            <span>concentric</span>
+            <input
+              id="lab-conc"
+              type="range"
+              min="0"
+              max="1"
+              step="0.01"
+              value="0"
+            />
+            <span class="val" id="lab-conc-v">0.00</span>
+          </label>
+          <label class="slide">
+            <span>barcode</span>
+            <input
+              id="lab-bar"
+              type="range"
+              min="0"
+              max="1"
+              step="0.01"
+              value="0"
+            />
+            <span class="val" id="lab-bar-v">0.00</span>
+          </label>
+          <label class="slide">
+            <span>branch</span>
+            <input
+              id="lab-branch"
+              type="range"
+              min="0"
+              max="1"
+              step="0.01"
+              value="0"
+            />
+            <span class="val" id="lab-branch-v">0.00</span>
+          </label>
+          <label class="slide">
+            <span>stars</span>
+            <input
+              id="lab-star"
+              type="range"
+              min="0"
+              max="1"
+              step="0.01"
+              value="0"
+            />
+            <span class="val" id="lab-star-v">0.00</span>
+          </label>
+        </div>
+        <div class="togs">
+          <label class="tog">
+            <input id="lab-nonlinear" type="checkbox" />
+            非線性
+          </label>
+          <div class="togs vein-path-row">
+            <label class="tog">
+              <input id="lab-path" type="checkbox" />
+              顯示造型路徑
+            </label>
+            <div class="vein-path-actions">
+              <button type="button" class="icon" id="lab-copy" title="複製參數 JSON">
+                複製
+              </button>
+              <button type="button" class="icon" id="lab-load" title="載入參數 JSON">
+                Load
+              </button>
+            </div>
+            <input
+              id="lab-load-json"
+              type="file"
+              accept="application/json,.json"
+              hidden
+            />
           </div>
-          <input
-            id="lab-load-json"
-            type="file"
-            accept="application/json,.json"
-            hidden
-          />
+          <label class="tog">
+            <input id="lab-brush" type="checkbox" checked />
+            顯示筆刷
+          </label>
         </div>
         <div class="lab">
           <label class="share">
@@ -138,7 +186,7 @@
               id="lab-leaf-sw"
               type="range"
               min="0.5"
-              max="12"
+              max="6"
               step="0.05"
               value="1"
             />
@@ -150,7 +198,7 @@
               id="lab-line-sw"
               type="range"
               min="0.5"
-              max="12"
+              max="6"
               step="0.05"
               value="1"
             />
@@ -219,27 +267,19 @@
           <span>鉛筆質感</span>
         </label>
         <label class="row-check">
+          <input id="lab-white" type="checkbox" checked />
+          <span>白色</span>
+        </label>
+        <label class="row-check">
           <input id="lab-live" type="checkbox" checked />
           <span>即時</span>
-        </label>
-        <label class="slide">
-          <span>質感密度</span>
-          <input
-            id="lab-pencil-dens"
-            type="range"
-            min="3"
-            max="6"
-            step="0.05"
-            value="3"
-          />
-          <span class="val" id="lab-pencil-dens-v">3.00</span>
         </label>
         <div class="run-row">
           <button type="button" class="gen" id="lab-reseed">新種子</button>
         </div>
       </div>
     </aside>
-    <script src="mix-vein.js?v=sw18"></script>
-    <script src="sketch2.js?v=sw18"></script>
+    <script src="mix-vein.js?v=sw25"></script>
+    <script src="sketch2.js?v=sw72"></script>
   </body>
 </html>

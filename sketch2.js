@@ -6,10 +6,38 @@
 
 const ASE_W = 1000;
 const ASE_H = 1000;
-const ASE_ROW = 100;
-const ASE_STEP = 15;
-const ASE_TOP = 100;
-const ASE_SIDE =50;
+const ASE_ROWS = 3; // 幾行
+const ASE_COLS = 3; // 幾列
+const ASE_MARGIN = 150; // 離畫布邊緣
+const ASE_LENMIN = 0.5; // 最短（格子邊長倍率）
+const ASE_LENMAX = 1.5; // 最長（格子邊長倍率）
+const ASE_ARCS = 3; // 每個位置畫幾條弧
+//--------------------------------
+const ASE_RINGS = 4; // concentric：幾層圓
+const ASE_RING_GAP = 150; // concentric：每層距離
+const ASE_HOBBS = 0.5; // concentric：Hobbs 變形幅度
+const ASE_RING_COPIES = 3; // concentric：每層複本上限，實際 int(random(1, max+1))
+const ASE_RING_SCALE = 0.4; // concentric：整體大小，1＝現況 
+//--------------------------------
+const ASE_BARS = 40; // barcode：中央直線條數
+const ASE_BAR_H = 380; // barcode：基準高度
+const ASE_BAR_TILT = 0.14; // barcode：離垂直的斜度（弧度）
+const ASE_BAR_NOISE = 16; // barcode：Perlin 橫向振幅
+//--------------------------------
+const ASE_BRANCH_SEEDS = 20; // branch：中心往外的主枝
+const ASE_BRANCH_MAX = 80; // branch：同時活著上限
+const ASE_BRANCH_STEP = 3; // branch：每步長
+const ASE_BRANCH_NOISE = 0.04; // branch：Perlin 座標縮放
+const ASE_BRANCH_DEPTH = 3; // branch：主枝＋二層＋三層
+//--------------------------------
+const ASE_STAR_MIN = 7; // stars：亂數中心下限
+const ASE_STAR_MAX = 12; // stars：亂數中心上限
+const ASE_STAR_LEN = 120; // stars：放射線基準長
+const ASE_STAR_STEP = 4; // stars：每步長
+const ASE_STAR_NOISE = 0.025; // stars：Perlin 座標縮放
+//--------------------------------
+const ASE_LAYOUT_N = 40; // 五套造型各幾條，morph 對齊
+const ASE_PENCIL_DENS = 3; // 鉛筆 texZoom，原滑桿下限
 const ASE_PAPER = [246, 236, 214];
 const ASE_PD = 2;
 const ASE_LS_KEY = "vein-asemic-op-v1";
@@ -17,8 +45,15 @@ const ASE_LS_KEY = "vein-asemic-op-v1";
 const ASE_LAB = Object.assign({}, MixVein.DEFAULTS, {
   randPath: false,
   pencil: false,
-  pencilDens: 3,
   live: true,
+  nonlinear: false,
+  brush: true,
+  gridT: 1,
+  concT: 0,
+  barT: 0,
+  branchT: 0,
+  starT: 0,
+  white: true,
 });
 
 let aseSeed = 1;
@@ -32,6 +67,7 @@ let strokePg;
 let asePencilReady = false;
 let aseBake = null;
 let aseBakePaths = null;
+let aseMorphCache = null;
 
 function aseClamp(n, lo, hi, fallback) {
   const x = Number(n);
@@ -50,20 +86,85 @@ function aseApplyPreset(o) {
   if (o.leafPad != null) ASE_LAB.leafPad = aseClamp(o.leafPad, 0, 1, 1);
   if (o.leafDens != null) ASE_LAB.leafDens = aseClamp(o.leafDens, 1, 2, 1);
   if (o.leafOff != null) ASE_LAB.leafOff = aseClamp(o.leafOff, -1, 1, 0);
-  if (o.leafSw != null) ASE_LAB.leafSw = aseClamp(o.leafSw, 0.5, 12, 1);
-  if (o.lineSw != null) ASE_LAB.lineSw = aseClamp(o.lineSw, 0.5, 12, 1);
-  if (o.pencilDens != null) ASE_LAB.pencilDens = aseClamp(o.pencilDens, 3, 6, 3);
+  if (o.leafSw != null) ASE_LAB.leafSw = aseClamp(o.leafSw, 0.5, 6, 1);
+  if (o.lineSw != null) ASE_LAB.lineSw = aseClamp(o.lineSw, 0.5, 6, 1);
   if (typeof o.showPath === "boolean") ASE_LAB.showPath = o.showPath;
   if (typeof o.randPath === "boolean") ASE_LAB.randPath = o.randPath;
   if (typeof o.pencil === "boolean") ASE_LAB.pencil = o.pencil;
   if (typeof o.live === "boolean") ASE_LAB.live = o.live;
+  if (typeof o.white === "boolean") ASE_LAB.white = o.white;
+  if (typeof o.nonlinear === "boolean") ASE_LAB.nonlinear = o.nonlinear;
+  if (typeof o.brush === "boolean") ASE_LAB.brush = o.brush;
+  if (
+    o.gridT != null ||
+    o.concT != null ||
+    o.barT != null ||
+    o.branchT != null ||
+    o.starT != null
+  ) {
+    if (o.gridT != null) ASE_LAB.gridT = aseClamp(o.gridT, 0, 1, 1);
+    if (o.concT != null) ASE_LAB.concT = aseClamp(o.concT, 0, 1, 0);
+    if (o.barT != null) ASE_LAB.barT = aseClamp(o.barT, 0, 1, 0);
+    if (o.branchT != null) ASE_LAB.branchT = aseClamp(o.branchT, 0, 1, 0);
+    if (o.starT != null) ASE_LAB.starT = aseClamp(o.starT, 0, 1, 0);
+  } else if (o.layoutT != null) {
+    const t = aseClamp(o.layoutT, 0, 1, 0);
+    ASE_LAB.gridT = 1 - t;
+    ASE_LAB.concT = t;
+    ASE_LAB.barT = 0;
+    ASE_LAB.branchT = 0;
+    ASE_LAB.starT = 0;
+  } else if (o.layout === "concentric") {
+    ASE_LAB.gridT = 0;
+    ASE_LAB.concT = 1;
+    ASE_LAB.barT = 0;
+    ASE_LAB.branchT = 0;
+    ASE_LAB.starT = 0;
+  } else if (o.layout === "grid") {
+    ASE_LAB.gridT = 1;
+    ASE_LAB.concT = 0;
+    ASE_LAB.barT = 0;
+    ASE_LAB.branchT = 0;
+    ASE_LAB.starT = 0;
+  } else if (o.layout === "star" || o.layout === "stars") {
+    ASE_LAB.gridT = 0;
+    ASE_LAB.concT = 0;
+    ASE_LAB.barT = 0;
+    ASE_LAB.branchT = 0;
+    ASE_LAB.starT = 1;
+  }
   return true;
 }
 
-function aseRandStep(lo, hi, step) {
+function aseHashSeed(a, b) {
+  let x = (a >>> 0) ^ Math.imul((Number(b) * 1000) | 0, 0x9e3779b9);
+  x = Math.imul(x ^ (x >>> 16), 0x85ebca6b);
+  x = Math.imul(x ^ (x >>> 13), 0xc2b2ae35);
+  return (x ^ (x >>> 16)) >>> 0 || 1;
+}
+
+function aseRng(seed) {
+  let s = seed >>> 0 || 1;
+  return function () {
+    s = (Math.imul(s, 1664525) + 1013904223) >>> 0;
+    return s / 4294967296;
+  };
+}
+
+function aseRandStep(lo, hi, step, rng) {
+  const roll = rng || random;
   const n = Math.round((hi - lo) / step);
-  const v = lo + Math.floor(random() * (n + 1)) * step;
+  const v = lo + Math.floor(roll() * (n + 1)) * step;
   return +v.toFixed(step >= 1 ? 0 : 2);
+}
+
+/** 葉子／直線線寬：60% 低於 2.5，30% 2.5–4.5，10% 4.5–6 */
+function aseRandStrokeSw(rng) {
+  const roll = rng || random;
+  const r = roll();
+  if (r < 0.6) return aseRandStep(0.5, 2.5, 0.05, roll);
+  if (r < 0.9) return aseRandStep(2.5, 4.5, 0.05, roll);
+  return aseRandStep(4.5, 6, 0.05, roll);
 }
 
 function aseLabOpts(salt) {
@@ -79,7 +180,6 @@ function aseLabOpts(salt) {
     leafOff: ASE_LAB.leafOff,
     leafSw: ASE_LAB.leafSw,
     lineSw: ASE_LAB.lineSw,
-    pencilDens: ASE_LAB.pencilDens,
     showPath: !!ASE_LAB.showPath,
     salt: salt || 0,
   };
@@ -89,17 +189,18 @@ function aseLabOpts(salt) {
 function asePathOpts(salt) {
   const o = aseLabOpts(salt);
   if (!ASE_LAB.randPath) return o;
-  o.leafShare = aseRandStep(0, 1, 0.01);
-  o.gapFill = aseRandStep(2, 60, 1);
-  o.leafLen = aseRandStep(0.05, 5, 0.05);
-  o.leafWid = aseRandStep(1, 3, 0.05);
-  o.leafDens = aseRandStep(1, 2, 0.05);
-  o.leafSw = aseRandStep(0.5, 12, 0.05);
-  o.lineSw = aseRandStep(0.5, 12, 0.05);
-  o.leafVein = aseRandStep(0, 1, 0.01);
-  o.leafTri = aseRandStep(0, 1, 0.01);
-  o.leafOff = aseRandStep(-1, 1, 0.01);
-  o.leafPad = aseRandStep(0, 1, 0.01);
+  const rng = aseRng(aseHashSeed(aseSeed, salt || 0));
+  o.leafShare = aseRandStep(0, 1, 0.01, rng);
+  o.gapFill = aseRandStep(2, 60, 1, rng);
+  o.leafLen = aseRandStep(0.05, 5, 0.05, rng);
+  o.leafWid = aseRandStep(1, 3, 0.05, rng);
+  o.leafDens = aseRandStep(1, 2, 0.05, rng);
+  o.leafSw = aseRandStrokeSw(rng);
+  o.lineSw = aseRandStrokeSw(rng);
+  o.leafVein = aseRandStep(0, 1, 0.01, rng);
+  o.leafTri = aseRandStep(0, 1, 0.01, rng);
+  o.leafOff = aseRandStep(-1, 1, 0.01, rng);
+  o.leafPad = aseRandStep(0, 1, 0.01, rng);
   return o;
 }
 
@@ -117,7 +218,13 @@ function asePresetObject() {
     leafOff: +Number(ASE_LAB.leafOff).toFixed(2),
     leafSw: +Number(ASE_LAB.leafSw).toFixed(2),
     lineSw: +Number(ASE_LAB.lineSw).toFixed(2),
-    pencilDens: +Number(ASE_LAB.pencilDens).toFixed(2),
+    gridT: +Number(ASE_LAB.gridT || 0).toFixed(2),
+    concT: +Number(ASE_LAB.concT || 0).toFixed(2),
+    barT: +Number(ASE_LAB.barT || 0).toFixed(2),
+    branchT: +Number(ASE_LAB.branchT || 0).toFixed(2),
+    starT: +Number(ASE_LAB.starT || 0).toFixed(2),
+    nonlinear: !!ASE_LAB.nonlinear,
+    brush: ASE_LAB.brush !== false,
   };
 }
 
@@ -146,8 +253,6 @@ function aseSyncSliders() {
   setText("lab-leaf-sw-v", Number(ASE_LAB.leafSw).toFixed(2));
   set("lab-line-sw", ASE_LAB.lineSw);
   setText("lab-line-sw-v", Number(ASE_LAB.lineSw).toFixed(2));
-  set("lab-pencil-dens", ASE_LAB.pencilDens);
-  setText("lab-pencil-dens-v", Number(ASE_LAB.pencilDens).toFixed(2));
   set("lab-leaf-vein", ASE_LAB.leafVein);
   set("lab-leaf-tri", ASE_LAB.leafTri);
   set("lab-leaf-off", ASE_LAB.leafOff);
@@ -159,8 +264,24 @@ function aseSyncSliders() {
   if (randEl) randEl.checked = !!ASE_LAB.randPath;
   const pencilEl = document.getElementById("lab-pencil");
   if (pencilEl) pencilEl.checked = !!ASE_LAB.pencil;
+  const nonlinearEl = document.getElementById("lab-nonlinear");
+  if (nonlinearEl) nonlinearEl.checked = !!ASE_LAB.nonlinear;
+  const brushEl = document.getElementById("lab-brush");
+  if (brushEl) brushEl.checked = ASE_LAB.brush !== false;
   const liveEl = document.getElementById("lab-live");
   if (liveEl) liveEl.checked = ASE_LAB.live !== false;
+  const whiteEl = document.getElementById("lab-white");
+  if (whiteEl) whiteEl.checked = ASE_LAB.white !== false;
+  set("lab-grid", ASE_LAB.gridT || 0);
+  setText("lab-grid-v", Number(ASE_LAB.gridT || 0).toFixed(2));
+  set("lab-conc", ASE_LAB.concT || 0);
+  setText("lab-conc-v", Number(ASE_LAB.concT || 0).toFixed(2));
+  set("lab-bar", ASE_LAB.barT || 0);
+  setText("lab-bar-v", Number(ASE_LAB.barT || 0).toFixed(2));
+  set("lab-branch", ASE_LAB.branchT || 0);
+  setText("lab-branch-v", Number(ASE_LAB.branchT || 0).toFixed(2));
+  set("lab-star", ASE_LAB.starT || 0);
+  setText("lab-star-v", Number(ASE_LAB.starT || 0).toFixed(2));
 }
 
 function aseCopyFallback(text, done, fail) {
@@ -240,8 +361,10 @@ function aseSaveLs() {
           showPath: !!ASE_LAB.showPath,
           randPath: !!ASE_LAB.randPath,
           pencil: !!ASE_LAB.pencil,
-          pencilDens: +Number(ASE_LAB.pencilDens).toFixed(2),
           live: ASE_LAB.live !== false,
+          white: ASE_LAB.white !== false,
+          nonlinear: !!ASE_LAB.nonlinear,
+          brush: ASE_LAB.brush !== false,
         })
       )
     );
@@ -293,34 +416,84 @@ function aseNewSeed(explicit) {
     aseSeed = (Math.floor(Math.random() * 1e9) % 2147483646) + 1;
   }
   aseWriteUrlSeed(aseSeed);
+  aseMorphCache = null;
   randomSeed(aseSeed);
   noiseSeed(aseSeed);
 }
 
-/** 橢圓弧抽點，給 MixVein.paint 當開放路徑。 */
-function aseArcPts(x, y, w, h, startDeg, stopDeg) {
-  let a0 = Number(startDeg);
-  let a1 = Number(stopDeg);
-  const ww = Number(w);
-  const hh = Number(h);
-  if (!Number.isFinite(a0) || !Number.isFinite(a1)) return [];
-  if (!Number.isFinite(ww) || !Number.isFinite(hh) || ww < 1 || hh < 1) {
-    return [];
-  }
-  if (Math.abs((((a1 - a0) % 360) + 360) % 360) < 0.5) return [];
-  while (a1 < a0) a1 += 360;
-  const rx = ww * 0.5;
-  const ry = hh * 0.5;
-  const sweep = ((a1 - a0) * Math.PI) / 180;
-  const approx = 0.5 * (rx + ry) * sweep;
+function asePolar(cx, cy, r, ang) {
+  return { x: cx + r * Math.cos(ang), y: cy + r * Math.sin(ang) };
+}
+
+function aseCubicAt(p0, p1, p2, p3, t) {
+  const u = 1 - t;
+  const uu = u * u;
+  const tt = t * t;
+  return {
+    x: uu * u * p0.x + 3 * uu * t * p1.x + 3 * u * tt * p2.x + tt * t * p3.x,
+    y: uu * u * p0.y + 3 * uu * t * p1.y + 3 * u * tt * p2.y + tt * t * p3.y,
+  };
+}
+
+function aseCubicLen(p0, p1, p2, p3) {
+  return (
+    Math.hypot(p1.x - p0.x, p1.y - p0.y) +
+    Math.hypot(p2.x - p1.x, p2.y - p1.y) +
+    Math.hypot(p3.x - p2.x, p3.y - p2.y)
+  );
+}
+
+/** 立方貝茲抽點，給 MixVein.paint 當開放路徑。 */
+function aseCubicPts(p0, p1, p2, p3) {
+  const approx = aseCubicLen(p0, p1, p2, p3);
   if (approx < 8) return [];
-  const n = Math.max(10, Math.ceil(approx / 3.5));
+  const n = Math.max(12, Math.ceil(approx / 3.5));
   const pts = [];
   for (let i = 0; i <= n; i++) {
-    const a = ((a0 + (a1 - a0) * (i / n)) * Math.PI) / 180;
-    pts.push({ x: x + rx * Math.cos(a), y: y + ry * Math.sin(a) });
+    pts.push(aseCubicAt(p0, p1, p2, p3, i / n));
   }
   return pts;
+}
+
+function aseMakeArc(x, y, w, h) {
+  const rx = Math.max(1, Number(w) * 0.5);
+  const ry = Math.max(1, Number(h) * 0.5);
+  const reach = Math.min(rx, ry);
+  const a0 = random(TWO_PI);
+  const turn = random(0.4, 1.35) * PI * (random() < 0.5 ? -1 : 1);
+  const a1 = a0 + turn;
+  const p0 = asePolar(x, y, random(0.25, 1) * reach, a0);
+  const p3 = asePolar(x, y, random(0.25, 1) * reach, a1);
+  const sCurve = random() < 0.5;
+  const mag = random(0.55, 1.55) * reach;
+  const mid = (a0 + a1) * 0.5;
+  const n0 = mid + HALF_PI;
+  const n1 = sCurve ? mid - HALF_PI : mid + HALF_PI;
+  const p1 = {
+    x: lerp(p0.x, p3.x, 0.32) + Math.cos(n0) * mag,
+    y: lerp(p0.y, p3.y, 0.32) + Math.sin(n0) * mag,
+  };
+  const p2 = {
+    x: lerp(p0.x, p3.x, 0.68) + Math.cos(n1) * mag * random(0.55, 1.2),
+    y: lerp(p0.y, p3.y, 0.68) + Math.sin(n1) * mag * random(0.55, 1.2),
+  };
+  const first = aseCubicPts(p0, p1, p2, p3);
+  if (first.length < 2) return [];
+  if (random() >= 0.4) return first;
+  const hookA = a1 + turn * random(0.35, 0.8);
+  const p6 = asePolar(x, y, random(0.2, 0.85) * reach, hookA);
+  const hookMag = random(0.35, 1.1) * reach;
+  const p4 = {
+    x: p3.x + Math.cos(n1) * hookMag,
+    y: p3.y + Math.sin(n1) * hookMag,
+  };
+  const p5 = {
+    x: lerp(p3.x, p6.x, 0.55) + Math.cos(hookA + HALF_PI) * hookMag * 0.7,
+    y: lerp(p3.y, p6.y, 0.55) + Math.sin(hookA + HALF_PI) * hookMag * 0.7,
+  };
+  const hook = aseCubicPts(p3, p4, p5, p6);
+  if (hook.length < 2) return first;
+  return first.concat(hook.slice(1));
 }
 
 function sNoise(v) {
@@ -403,7 +576,40 @@ function aseBeginPencil() {
   return true;
 }
 
-function drawStroke(pts, width, tex, color, dens) {
+function aseTaperWeight(i, n, thin, thick) {
+  const t = n <= 1 ? 0.5 : i / (n - 1);
+  const env = t < 0.5 ? t * 2 : (1 - t) * 2;
+  return lerp(thin, thick, env);
+}
+
+function aseMarkTaper(strokes) {
+  if (!strokes) return;
+  for (let i = 0; i < strokes.length; i++) {
+    const st = strokes[i];
+    if (!st) continue;
+    const sw = Number(st.sw);
+    if (!Number.isFinite(sw) || sw < 3) {
+      st.taper = false;
+      continue;
+    }
+    const id =
+      (Number(st.pathSalt) || 0) * 17 +
+      i * 1.37 +
+      (st.kind === "leaf" ? 8.3 : 2.1);
+    st.taper = aseRng(aseHashSeed(aseSeed, id + 91.7))() < 0.2;
+  }
+}
+
+function aseStrokeTaperOpen(pts, thin, thick) {
+  if (!pts || pts.length < 2) return;
+  const n = pts.length;
+  for (let i = 0; i < n - 1; i++) {
+    strokeWeight(aseTaperWeight(i, n, thin, thick));
+    line(pts[i].x, pts[i].y, pts[i + 1].x, pts[i + 1].y);
+  }
+}
+
+function drawStroke(pts, width, tex, color, dens, widths) {
   if (!pts || pts.length < 2) return;
   const sides = [[], []];
   let length = 0;
@@ -411,8 +617,10 @@ function drawStroke(pts, width, tex, color, dens) {
     length += pts[i].dist(pts[i + 1]);
   }
   if (!(length > 0.5)) return;
-  const half = width * 0.5;
   pts.forEach((p, i) => {
+    const wi =
+      widths && Number.isFinite(widths[i]) ? widths[i] : width;
+    const half = wi * 0.5;
     const ia = max(0, i - 1);
     const ib = min(pts.length - 1, i + 1);
     const dir = p5.Vector.sub(pts[ib], pts[ia]);
@@ -434,7 +642,7 @@ function drawStroke(pts, width, tex, color, dens) {
   strokePg.shader(strokeProgram);
   aseGlFrame(strokePg, true);
   const zoom = constrain(
-    Number.isFinite(Number(dens)) ? Number(dens) : ASE_LAB.pencilDens,
+    Number.isFinite(Number(dens)) ? Number(dens) : ASE_PENCIL_DENS,
     3,
     6
   );
@@ -448,9 +656,19 @@ function drawStroke(pts, width, tex, color, dens) {
   if (glw) glw.texParameteri(glw.TEXTURE_2D, glw.TEXTURE_WRAP_T, glw.REPEAT);
   strokePg.beginShape(TRIANGLE_STRIP);
   for (let i = 0; i <= last; i++) {
+    strokePg.vertex(sides[0][i].x, sides[0][i].y, 0);
+    strokePg.vertex(sides[1][i].x, sides[1][i].y, 0);
+  }
+  const geom =
+    strokePg._renderer &&
+    strokePg._renderer.immediateMode &&
+    strokePg._renderer.immediateMode.geometry;
+  if (geom && geom.uvs) {
+    geom.uvs.length = 0;
+  for (let i = 0; i <= last; i++) {
     const v = i / last;
-    strokePg.vertex(sides[0][i].x, sides[0][i].y, 0, v);
-    strokePg.vertex(sides[1][i].x, sides[1][i].y, 1, v);
+      geom.uvs.push(0, v, 1, v);
+    }
   }
   strokePg.endShape();
 }
@@ -468,36 +686,1018 @@ function aseEndPencil() {
   pop();
 }
 
-function aseMakeArc(x, y, mySize1, mySize2) {
-  const ang1 = random([90, 270, 360, 180]);
-  const ang2 = random([270, 90, 180, 360]);
-  return aseArcPts(x, y, mySize1, mySize2, ang1, ang2);
+function aseHobbsNoise(a, salt, freq) {
+  const nx = Math.cos(a);
+  const ny = Math.sin(a);
+  const n1 = noise(nx * freq + salt, ny * freq, salt * 0.2);
+  const n2 = noise(nx * freq * 2.15 + salt + 19, ny * freq * 2.15, salt * 0.51);
+  return (n1 - 0.5) * 1.35 + (n2 - 0.5) * 0.5;
 }
 
-/** 先抽完全部弧點，兩種畫法共用同一批路徑。 */
-function aseCollectPaths() {
+/** 圓／橢圓與 Hobbs 變形做 blend，閉合週期噪音所以首尾相接。 */
+function aseHobbsCircle(cx, cy, rx, ry, rot, salt) {
+  const n = Math.max(28, Math.ceil((Math.PI * (rx + ry)) / 3.5));
+  const blend = random(0.4, 1);
+  const amp = ASE_HOBBS * blend;
+  const cr = Math.cos(rot);
+  const sr = Math.sin(rot);
+  const pts = [];
+  for (let i = 0; i < n; i++) {
+    const a = (i / n) * Math.PI * 2;
+    const wob = 1 + amp * aseHobbsNoise(a, salt, 1.75);
+    const lx = Math.cos(a) * rx * wob;
+    const ly = Math.sin(a) * ry * wob;
+    pts.push({
+      x: cx + lx * cr - ly * sr,
+      y: cy + lx * sr + ly * cr,
+    });
+  }
+  return pts;
+}
+
+function aseCapPaths(paths, n) {
+  n = Math.max(1, Math.floor(n));
+  if (!paths || paths.length <= n) return paths || [];
+  const ranked = paths.map((p, i) => ({
+    p,
+    i,
+    len: asePathLen(p.pts, !!p.closed),
+  }));
+  ranked.sort((a, b) => b.len - a.len || a.i - b.i);
+  return ranked.slice(0, n).map((x) => x.p);
+}
+
+function aseCollectGridPaths() {
   const paths = [];
-  const inner = Math.max(0, width - ASE_SIDE * 2);
-  const n = Math.floor(inner / ASE_STEP);
-  let row = 0;
-  for (let yy = ASE_TOP; yy < height - ASE_SIDE; yy += ASE_ROW) {
+  const rows = Math.max(1, Math.floor(ASE_ROWS));
+  const cols = Math.max(1, Math.floor(ASE_COLS));
+  const arcs = Math.max(1, Math.floor(ASE_ARCS));
+  const margin = Math.max(0, ASE_MARGIN);
+  const innerW = Math.max(1, ASE_W - margin * 2);
+  const innerH = Math.max(1, ASE_H - margin * 2);
+  const cellW = innerW / cols;
+  const cellH = innerH / rows;
+  const span = Math.min(cellW, cellH);
+  for (let row = 0; row < rows; row++) {
+    for (let col = 0; col < cols; col++) {
+      const x = margin + (col + 0.5) * cellW;
+      const y = margin + (row + 0.5) * cellH;
+      for (let k = 0; k < arcs; k++) {
+        const len = span * random(ASE_LENMIN, ASE_LENMAX);
+        const pts = aseMakeArc(x, y, len, len);
+        if (pts.length >= 2) {
+          paths.push({
+            pts,
+            salt: row * 17.3 + col * 0.41 + k * 3.1,
+            closed: false,
+          });
+        }
+      }
+    }
+  }
+  let extra = 0;
+  while (paths.length < ASE_LAYOUT_N && extra < ASE_LAYOUT_N * 3) {
+    const row = Math.floor(random(rows));
+    const col = Math.floor(random(cols));
+    const x = margin + (col + 0.5) * cellW;
+    const y = margin + (row + 0.5) * cellH;
+    const len = span * random(ASE_LENMIN, ASE_LENMAX);
+    const pts = aseMakeArc(x, y, len, len);
+    if (pts.length >= 2) {
+      paths.push({
+        pts,
+        salt: row * 17.3 + col * 0.41 + (arcs + extra) * 3.1,
+        closed: false,
+      });
+    }
+    extra++;
+  }
+  return aseCapPaths(paths, ASE_LAYOUT_N);
+}
+
+/** 一圈拆成 1–4 段開放弧，避免一筆畫到底。 */
+function aseSplitRing(pts, salt) {
+  if (!pts || pts.length < 8) return [{ pts, closed: true, salt }];
+  const segs = 1 + Math.floor(random(4));
+  if (segs <= 1) return [{ pts, closed: true, salt }];
+  const n = pts.length;
+  const origin = Math.floor(random(n));
+  const out = [];
+  let cursor = 0;
+  for (let s = 0; s < segs; s++) {
+    const remain = segs - s;
+    const left = n - cursor;
+    let take =
+      s === segs - 1
+        ? left
+        : Math.round(left / remain + random(-n * 0.06, n * 0.06));
+    take = Math.max(4, Math.min(left - (remain - 1) * 4, take));
+    const gap = s < segs - 1 ? Math.min(4, Math.max(1, Math.floor(random(1, 4)))) : 0;
+    const slice = [];
+    const keep = Math.max(2, take - gap);
+    for (let i = 0; i < keep; i++) {
+      slice.push(pts[(origin + cursor + i) % n]);
+    }
+    cursor += take;
+    if (slice.length >= 2) {
+      out.push({ pts: slice, closed: false, salt: salt + s * 0.73 });
+    }
+  }
+  return out.length ? out : [{ pts, closed: true, salt }];
+}
+
+function aseCollectConcentricPaths() {
+  const paths = [];
+  const cx = ASE_W * 0.5 + random(-100, 100);
+  const cy = ASE_H * 0.5 + random(-100, 100);
+  const scale = Math.max(0.05, Number(ASE_RING_SCALE) || 1);
+  const gap = Math.max(8, ASE_RING_GAP);
+  const copiesMax = Math.max(1, Math.floor(ASE_RING_COPIES));
+  const rings = Math.max(1, Math.floor(ASE_RINGS));
+  for (let i = 1; i <= rings; i++) {
+    const baseR = i * gap * scale;
+    const copies = 1 + Math.floor(random(copiesMax));
+    for (let k = 0; k < copies; k++) {
+      const r = baseR * random(0.96, 1.05);
+      const ox = random(-gap * 0.28, gap * 0.28) * scale;
+      const oy = random(-gap * 0.28, gap * 0.28) * scale;
+      const aspect = random() < 0.32 ? random(0.92, 1.08) : random(0.62, 1.38);
+      const rot = random(Math.PI * 2);
+      const salt = i * 4.17 + k * 2.63;
+      const pts = aseHobbsCircle(cx + ox, cy + oy, r, r * aspect, rot, salt);
+      if (pts.length < 2) continue;
+      const bits = aseSplitRing(pts, salt);
+      for (let b = 0; b < bits.length; b++) {
+        paths.push(bits[b]);
+      }
+    }
+  }
+  let extra = 0;
+  while (paths.length < ASE_LAYOUT_N && extra < ASE_LAYOUT_N * 4) {
+    const i = 1 + Math.floor(random(rings));
+    const baseR = i * gap * scale;
+    const r = baseR * random(0.96, 1.05);
+    const ox = random(-gap * 0.28, gap * 0.28) * scale;
+    const oy = random(-gap * 0.28, gap * 0.28) * scale;
+    const aspect = random() < 0.32 ? random(0.92, 1.08) : random(0.62, 1.38);
+    const rot = random(Math.PI * 2);
+    const salt = 90 + extra * 2.63;
+    const pts = aseHobbsCircle(cx + ox, cy + oy, r, r * aspect, rot, salt);
+    extra++;
+    if (pts.length < 2) continue;
+    const bits = aseSplitRing(pts, salt);
+    for (let b = 0; b < bits.length; b++) paths.push(bits[b]);
+  }
+  return aseCapPaths(paths, ASE_LAYOUT_N);
+}
+
+/** 畫面中央一排斜線，Perlin 微彎，間隔聚散像條碼。 */
+function aseCollectBarcodePaths() {
+  const paths = [];
+  const n = Math.max(4, ASE_LAYOUT_N);
+  const margin = Math.max(40, ASE_MARGIN * 0.55);
+  const innerW = Math.max(1, ASE_W - margin * 2);
+  const cy = ASE_H * 0.5;
+  const h0 = Math.max(40, ASE_BAR_H);
+  const tiltMax = Math.max(0, ASE_BAR_TILT);
+  const amp = Math.max(0, ASE_BAR_NOISE);
+  const gaps = [];
+  for (let i = 0; i < n - 1; i++) {
+    const u = random();
+    if (u < 0.4) gaps.push(random(0.12, 0.38));
+    else if (u < 0.74) gaps.push(random(0.65, 1.35));
+    else gaps.push(random(2.1, 4.6));
+  }
+  let gapSum = 0;
+  for (let i = 0; i < gaps.length; i++) gapSum += gaps[i];
+  const xs = [margin];
+  let xWalk = margin;
+  for (let i = 0; i < gaps.length; i++) {
+    xWalk += (gaps[i] / gapSum) * innerW;
+    xs.push(xWalk);
+  }
     for (let i = 0; i < n; i++) {
-      const pts = aseMakeArc(
-        ASE_SIDE + ASE_STEP * i,
-        yy,
-        random(1, 90),
-        random(1, 90)
-      );
+    const x = xs[i];
+    const tall = random() < 0.14;
+    const hi = h0 * (tall ? random(1.18, 1.55) : random(0.78, 1.06));
+    const tilt = random(-tiltMax, tiltMax);
+    const salt = 110 + i * 2.17;
+    const steps = Math.max(18, Math.ceil(hi / 10));
+    const dx = Math.sin(tilt);
+    const dy = Math.cos(tilt);
+    const px = dy;
+    const py = -dx;
+    const pts = [];
+    for (let k = 0; k <= steps; k++) {
+      const u = k / steps;
+      const t = u - 0.5;
+      const n1 = noise(i * 0.31 + salt, u * 1.7, salt * 0.2);
+      const n2 = noise(i * 0.73 + salt + 9, u * 3.4, salt * 0.51);
+      const wob = ((n1 - 0.5) * 1.35 + (n2 - 0.5) * 0.5) * amp;
+      pts.push({
+        x: x + dx * t * hi + px * wob,
+        y: cy + dy * t * hi + py * wob,
+      });
+    }
       if (pts.length >= 2) {
         paths.push({
           pts,
-          salt: row * 17.3 + i * 0.41,
+        closed: false,
+        salt,
         });
       }
     }
-    row++;
+  return aseCapPaths(paths, ASE_LAYOUT_N);
+}
+
+function aseAngWrap(a) {
+  while (a > Math.PI) a -= Math.PI * 2;
+  while (a < -Math.PI) a += Math.PI * 2;
+  return a;
+}
+
+/** 中心往外長：主枝均勻占角度，Perlin 只做微彎，避免全擠一邊。 */
+function aseCollectBranchPaths() {
+  const cx = ASE_W * 0.5 + random(-100, 100);
+  const cy = ASE_H * 0.5 + random(-100, 100);
+  const freq = Math.max(0.005, ASE_BRANCH_NOISE);
+  const step = Math.max(0.5, ASE_BRANCH_STEP);
+  const liveMax = Math.max(4, Math.floor(ASE_BRANCH_MAX));
+  const seeds = Math.max(3, Math.floor(ASE_BRANCH_SEEDS));
+  const spin = random(Math.PI * 2);
+  const busy = Math.floor(random(seeds));
+  const live = [];
+  for (let i = 0; i < seeds; i++) {
+    const home = spin + (i / seeds) * Math.PI * 2 + random(-0.12, 0.12);
+    const reach = random(6, 14);
+    const x = cx + Math.cos(home) * reach;
+    const y = cy + Math.sin(home) * reach;
+    live.push({
+      x,
+      y,
+      dir: home + random(-0.1, 0.1),
+      home,
+      family: i,
+      gen: 0,
+      budget: i === busy ? 5 + Math.floor(random(4)) : 1 + Math.floor(random(3)),
+      size: random(5, 8),
+      age: 0,
+      life: 52 + Math.floor(random(44)),
+      pts: [{ x, y }],
+    });
   }
-  return paths;
+  const depth = Math.max(1, Math.floor(ASE_BRANCH_DEPTH));
+  const done = [];
+  const maxSteps = 280;
+  for (let s = 0; s < maxSteps && live.length; s++) {
+    const born = [];
+    for (let i = 0; i < live.length; i++) {
+      const d = live[i];
+      const forkAge = 10 + d.gen * 6;
+      if (
+        d.budget > 0 &&
+        d.gen < depth - 1 &&
+        d.age > forkAge &&
+        live.length + born.length < liveMax &&
+        random() < 0.07 + (d.family === busy ? 0.04 : 0)
+      ) {
+        const side = random() < 0.5 ? -1 : 1;
+        const kick = side * (0.72 + d.gen * 0.32 + random(0, 0.28));
+        const home = d.home + kick;
+        const nextGen = d.gen + 1;
+        born.push({
+          x: d.x,
+          y: d.y,
+          dir: d.dir + kick,
+          home,
+          family: d.family,
+          gen: nextGen,
+          budget:
+            nextGen < depth - 1
+              ? 1 + Math.floor(random(nextGen === 1 && d.family === busy ? 3 : 2))
+              : 0,
+          size: Math.max(2, d.size * 0.72),
+          age: 0,
+          life: 40 + Math.floor(random(36)) - nextGen * 4,
+          pts: [{ x: d.x, y: d.y }],
+        });
+        d.budget--;
+      }
+    }
+    for (let i = 0; i < born.length; i++) live.push(born[i]);
+    for (let i = live.length - 1; i >= 0; i--) {
+      const d = live[i];
+      const away = Math.atan2(d.y - cy, d.x - cx);
+      const wob = (noise(d.x * freq, d.y * freq, d.family * 0.37) - 0.5) * 0.4;
+      d.dir += random(-0.16, 0.16) + wob;
+      d.dir += aseAngWrap(d.home - d.dir) * (d.gen > 0 ? 0.16 : 0.1);
+      d.dir += aseAngWrap(away - d.dir) * (d.gen > 0 ? 0.14 : 0.24);
+      d.x += step * Math.cos(d.dir);
+      d.y += step * Math.sin(d.dir);
+      d.age++;
+      d.pts.push({ x: d.x, y: d.y });
+      if (d.age > d.life) {
+        if (d.pts.length >= 2) done.push(d);
+        live.splice(i, 1);
+      }
+    }
+  }
+  for (let i = 0; i < live.length; i++) {
+    if (live[i].pts.length >= 2) done.push(live[i]);
+  }
+  const paths = [];
+  for (let i = 0; i < done.length; i++) {
+    paths.push({
+      pts: done[i].pts,
+      closed: false,
+      salt: 220 + i * 2.17,
+    });
+  }
+  let pad = 0;
+  while (paths.length < ASE_LAYOUT_N && pad < ASE_LAYOUT_N) {
+    const home = spin + (paths.length / ASE_LAYOUT_N) * Math.PI * 2 + random(-0.1, 0.1);
+    let x = cx + Math.cos(home) * 8;
+    let y = cy + Math.sin(home) * 8;
+    let dir = home;
+    const pts = [{ x, y }];
+    const life = 36 + Math.floor(random(32));
+    for (let k = 0; k < life; k++) {
+      dir += random(-0.16, 0.16);
+      dir += (noise(x * freq, y * freq, pad * 0.2) - 0.5) * 0.4;
+      dir += aseAngWrap(home - dir) * 0.12;
+      x += step * Math.cos(dir);
+      y += step * Math.sin(dir);
+      pts.push({ x, y });
+    }
+    paths.push({
+      pts,
+      closed: false,
+      salt: 220 + paths.length * 2.17,
+    });
+    pad++;
+  }
+  return aseCapPaths(paths, ASE_LAYOUT_N);
+}
+
+/** 滿天星：先撒 7–12 點，每點往外放射，總條數對齊 ASE_LAYOUT_N。 */
+function aseScatterStars(count) {
+  const margin = Math.max(90, ASE_MARGIN * 0.65);
+  const minDist = 88;
+  const pts = [];
+  let tries = 0;
+  while (pts.length < count && tries < count * 80) {
+    tries++;
+    const p = {
+      x: random(margin, ASE_W - margin),
+      y: random(margin, ASE_H - margin),
+    };
+    let ok = true;
+    for (let i = 0; i < pts.length; i++) {
+      if (Math.hypot(p.x - pts[i].x, p.y - pts[i].y) < minDist) {
+        ok = false;
+        break;
+      }
+    }
+    if (ok) pts.push(p);
+  }
+  while (pts.length < count) {
+    pts.push({
+      x: random(margin, ASE_W - margin),
+      y: random(margin, ASE_H - margin),
+    });
+  }
+  return pts;
+}
+
+function aseCollectStarPaths() {
+  const lo = Math.max(3, Math.floor(ASE_STAR_MIN));
+  const hi = Math.max(lo, Math.floor(ASE_STAR_MAX));
+  const n = lo + Math.floor(random(hi - lo + 1));
+  const centers = aseScatterStars(n);
+  const need = Math.max(n, ASE_LAYOUT_N);
+  const counts = new Array(n).fill(Math.floor(need / n));
+  let left = need - counts.reduce((s, v) => s + v, 0);
+  const order = [];
+  for (let i = 0; i < n; i++) order.push(i);
+  for (let i = order.length - 1; i > 0; i--) {
+    const j = Math.floor(random(i + 1));
+    const tmp = order[i];
+    order[i] = order[j];
+    order[j] = tmp;
+  }
+  for (let k = 0; k < left; k++) counts[order[k % n]]++;
+  const freq = Math.max(0.004, ASE_STAR_NOISE);
+  const step = Math.max(0.5, ASE_STAR_STEP);
+  const baseLen = Math.max(24, ASE_STAR_LEN);
+  const paths = [];
+  for (let i = 0; i < n; i++) {
+    const c = centers[i];
+    const rays = Math.max(2, counts[i]);
+    const spin = random(Math.PI * 2);
+    for (let j = 0; j < rays; j++) {
+      const home = spin + (j / rays) * Math.PI * 2 + random(-0.18, 0.18);
+      const reach = baseLen * random(0.42, 1.28);
+      const life = Math.max(8, Math.round(reach / step));
+      let x = c.x + Math.cos(home) * 3;
+      let y = c.y + Math.sin(home) * 3;
+      let dir = home;
+      const pts = [{ x: c.x, y: c.y }];
+      for (let k = 0; k < life; k++) {
+        const wob = (noise(x * freq, y * freq, i * 0.41 + j * 0.17) - 0.5) * 0.38;
+        dir += random(-0.12, 0.12) + wob;
+        dir += aseAngWrap(home - dir) * 0.22;
+        x += step * Math.cos(dir);
+        y += step * Math.sin(dir);
+        pts.push({ x, y });
+      }
+      paths.push({
+        pts,
+        closed: false,
+        salt: 330 + paths.length * 2.17,
+      });
+    }
+  }
+  return aseCapPaths(paths, ASE_LAYOUT_N);
+}
+
+const ASE_MORPH_N = 48;
+
+function asePathCentroid(pts) {
+  if (!pts || !pts.length) return { x: ASE_W * 0.5, y: ASE_H * 0.5 };
+  let sx = 0;
+  let sy = 0;
+  for (let i = 0; i < pts.length; i++) {
+    sx += pts[i].x;
+    sy += pts[i].y;
+  }
+  return { x: sx / pts.length, y: sy / pts.length };
+}
+
+function asePathsCentroid(paths) {
+  if (!paths || !paths.length) return { x: ASE_W * 0.5, y: ASE_H * 0.5 };
+  let sx = 0;
+  let sy = 0;
+  for (let i = 0; i < paths.length; i++) {
+    const c = asePathCentroid(paths[i].pts);
+    sx += c.x;
+    sy += c.y;
+  }
+  return { x: sx / paths.length, y: sy / paths.length };
+}
+
+function asePathLen(pts, closed) {
+  if (!pts || pts.length < 2) return 0;
+  const n = pts.length;
+  const segs = closed ? n : n - 1;
+  let total = 0;
+  for (let i = 0; i < segs; i++) {
+    const a = pts[i];
+    const b = pts[(i + 1) % n];
+    total += Math.hypot(b.x - a.x, b.y - a.y);
+  }
+  return total;
+}
+
+function aseAngDiff(a, b) {
+  let d = Math.abs(a - b);
+  if (d > Math.PI) d = Math.PI * 2 - d;
+  return d;
+}
+
+function asePathFeat(p) {
+  const c = asePathCentroid(p.pts);
+  const dx = c.x - ASE_W * 0.5;
+  const dy = c.y - ASE_H * 0.5;
+  return {
+    p,
+    ang: Math.atan2(dy, dx),
+    rad: Math.hypot(dx, dy),
+    len: asePathLen(p.pts, !!p.closed),
+  };
+}
+
+function aseMatchCost(a, b, maxLen, diag) {
+  const dLen = Math.abs(a.len - b.len) / maxLen;
+  const dAng = aseAngDiff(a.ang, b.ang) / Math.PI;
+  const dRad = Math.abs(a.rad - b.rad) / diag;
+  return dLen * 1.8 + dAng * 0.8 + dRad * 0.35;
+}
+
+function aseBestUnused(anchor, feats, used, maxLen, diag) {
+  let best = -1;
+  let bestC = Infinity;
+  for (let j = 0; j < feats.length; j++) {
+    if (used[j]) continue;
+    const cost = aseMatchCost(anchor, feats[j], maxLen, diag);
+    if (cost < bestC) {
+      bestC = cost;
+      best = j;
+    }
+  }
+  return best;
+}
+
+/** 先鎖長線：A→B 配對，多的那端之後縮進重心。 */
+function aseMatchTwo(listA, listB) {
+  const A = listA.map(asePathFeat).sort((a, b) => b.len - a.len || a.ang - b.ang);
+  const B = listB.map(asePathFeat);
+  const used = new Array(B.length).fill(false);
+  const pairs = [];
+  const diag = Math.hypot(ASE_W, ASE_H) || 1;
+  let maxLen = 1;
+  for (let i = 0; i < A.length; i++) if (A[i].len > maxLen) maxLen = A[i].len;
+  for (let j = 0; j < B.length; j++) if (B[j].len > maxLen) maxLen = B[j].len;
+  for (let i = 0; i < A.length; i++) {
+    const j = aseBestUnused(A[i], B, used, maxLen, diag);
+    if (j >= 0) {
+      used[j] = true;
+      pairs.push({ a: A[i].p, b: B[j].p });
+    } else {
+      pairs.push({ a: A[i].p, b: null });
+    }
+  }
+  for (let j = 0; j < B.length; j++) {
+    if (!used[j]) pairs.push({ a: null, b: B[j].p });
+  }
+  return pairs;
+}
+
+function aseBlankBundle() {
+  return { grid: null, conc: null, bar: null, branch: null, star: null };
+}
+
+function aseBundleAnchor(b) {
+  return b.grid || b.conc || b.bar || b.branch || b.star;
+}
+
+function aseAttachSide(bundles, key, paths) {
+  const feats = paths.map(asePathFeat);
+  const used = new Array(feats.length).fill(false);
+  const diag = Math.hypot(ASE_W, ASE_H) || 1;
+  let maxLen = 1;
+  for (let i = 0; i < bundles.length; i++) {
+    const p = aseBundleAnchor(bundles[i]);
+    if (p) {
+      const L = asePathLen(p.pts, !!p.closed);
+      if (L > maxLen) maxLen = L;
+    }
+  }
+  for (let j = 0; j < feats.length; j++) {
+    if (feats[j].len > maxLen) maxLen = feats[j].len;
+  }
+  const out = [];
+  for (let i = 0; i < bundles.length; i++) {
+    const next = Object.assign(aseBlankBundle(), bundles[i]);
+    const anchor = aseBundleAnchor(next);
+    const j = anchor
+      ? aseBestUnused(asePathFeat(anchor), feats, used, maxLen, diag)
+      : -1;
+    if (j >= 0) {
+      used[j] = true;
+      next[key] = feats[j].p;
+    }
+    out.push(next);
+  }
+  for (let j = 0; j < feats.length; j++) {
+    if (!used[j]) {
+      const extra = aseBlankBundle();
+      extra[key] = feats[j].p;
+      out.push(extra);
+    }
+  }
+  return out;
+}
+
+/** 五套造型同一條身份，長線對長線。 */
+function aseMatchBundles(grid, conc, bars, branches, stars) {
+  let bundles = aseMatchTwo(grid, conc).map((p) => ({
+    grid: p.a,
+    conc: p.b,
+    bar: null,
+    branch: null,
+    star: null,
+  }));
+  bundles = aseAttachSide(bundles, "bar", bars);
+  bundles = aseAttachSide(bundles, "branch", branches);
+  bundles = aseAttachSide(bundles, "star", stars);
+  return bundles;
+}
+
+function aseResamplePts(pts, closed, count) {
+  if (!pts || pts.length < 2 || count < 2) return null;
+  const n = pts.length;
+  const segs = closed ? n : n - 1;
+  const lens = new Array(segs);
+  let total = 0;
+  for (let i = 0; i < segs; i++) {
+    const a = pts[i];
+    const b = pts[(i + 1) % n];
+    const d = Math.hypot(b.x - a.x, b.y - a.y);
+    lens[i] = d;
+    total += d;
+  }
+  const out = [];
+  if (total < 1e-6) {
+    for (let k = 0; k < count; k++) out.push({ x: pts[0].x, y: pts[0].y });
+    return out;
+  }
+  for (let k = 0; k < count; k++) {
+    const target = closed
+      ? (k / count) * total
+      : (k / (count - 1)) * total;
+    let acc = 0;
+    let placed = false;
+    for (let i = 0; i < segs; i++) {
+      const next = acc + lens[i];
+      if (target <= next + 1e-9 || i === segs - 1) {
+        const span = lens[i] > 1e-9 ? lens[i] : 1;
+        const u = Math.max(0, Math.min(1, (target - acc) / span));
+        const a = pts[i];
+        const b = pts[(i + 1) % n];
+        out.push({
+          x: a.x + (b.x - a.x) * u,
+          y: a.y + (b.y - a.y) * u,
+        });
+        placed = true;
+        break;
+      }
+      acc = next;
+    }
+    if (!placed) out.push({ x: pts[n - 1].x, y: pts[n - 1].y });
+  }
+  return out;
+}
+
+function aseRotateNearest(pts, target) {
+  if (!pts || !pts.length || !target) return pts;
+  let bestI = 0;
+  let bestD = Infinity;
+  for (let i = 0; i < pts.length; i++) {
+    const dx = pts[i].x - target.x;
+    const dy = pts[i].y - target.y;
+    const d = dx * dx + dy * dy;
+    if (d < bestD) {
+      bestD = d;
+      bestI = i;
+    }
+  }
+  if (bestI === 0) return pts;
+  return pts.slice(bestI).concat(pts.slice(0, bestI));
+}
+
+function aseAlignPts(pts, closed, target) {
+  if (!pts || !pts.length || !target) return pts;
+  if (closed) return aseRotateNearest(pts, target);
+  const a = pts[0];
+  const b = pts[pts.length - 1];
+  const d0 = (a.x - target.x) * (a.x - target.x) + (a.y - target.y) * (a.y - target.y);
+  const d1 = (b.x - target.x) * (b.x - target.x) + (b.y - target.y) * (b.y - target.y);
+  return d1 < d0 ? pts.slice().reverse() : pts;
+}
+
+function aseFlatPts(c, count) {
+  const out = [];
+  for (let i = 0; i < count; i++) out.push({ x: c.x, y: c.y });
+  return out;
+}
+
+function aseSampleSide(path, closed, center) {
+  if (!path) return aseFlatPts(center, ASE_MORPH_N);
+  return aseResamplePts(path.pts, !!closed, ASE_MORPH_N);
+}
+
+/** 中段慢：0.3–0.7 多停在混合態，避免過 0.5 一次跳到另一邊。 */
+function aseEaseMid(t) {
+  t = aseClamp(t, 0, 1, 0);
+  const u = 2 * t - 1;
+  const mid = 0.5 + 0.5 * u * u * u;
+  return t * 0.4 + mid * 0.6;
+}
+
+function aseMorphMap(key) {
+  return aseEaseMid(aseLayoutWeight(key));
+}
+
+function aseMorphWeights() {
+  let wG = aseMorphMap("gridT");
+  let wC = aseMorphMap("concT");
+  let wB = aseMorphMap("barT");
+  let wR = aseMorphMap("branchT");
+  let wS = aseMorphMap("starT");
+  let sum = wG + wC + wB + wR + wS;
+  if (sum <= 1e-6) return { wG: 0, wC: 0, wB: 0, wR: 0, wS: 0, wRest: 1, sum: 0 };
+  if (sum > 1) {
+    wG /= sum;
+    wC /= sum;
+    wB /= sum;
+    wR /= sum;
+    wS /= sum;
+    sum = 1;
+  }
+  return { wG, wC, wB, wR, wS, wRest: 1 - sum, sum };
+}
+
+function aseMorphBundles(bundles, pack, weights) {
+  const list = bundles || [];
+  if (!list.length) return [];
+  const gridCenter = asePathsCentroid(pack.grid);
+  const concCenter = asePathsCentroid(pack.conc);
+  const barCenter = asePathsCentroid(pack.bars);
+  const branchCenter = asePathsCentroid(pack.branches);
+  const starCenter = asePathsCentroid(pack.stars);
+  const rest = { x: ASE_W * 0.5, y: ASE_H * 0.5 };
+  const out = [];
+  for (let i = 0; i < list.length; i++) {
+    const g = list[i].grid;
+    const c = list[i].conc;
+    const b = list[i].bar;
+    const r = list[i].branch;
+    const s = list[i].star;
+    let pg = aseSampleSide(g, g && g.closed, gridCenter);
+    let pc = aseSampleSide(c, c && c.closed, concCenter);
+    let pb = aseSampleSide(b, b && b.closed, barCenter);
+    let pr = aseSampleSide(r, r && r.closed, branchCenter);
+    let ps = aseSampleSide(s, s && s.closed, starCenter);
+    if (!pg || !pc || !pb || !pr || !ps) continue;
+    const ref = g ? pg[0] : c ? pc[0] : b ? pb[0] : r ? pr[0] : ps[0];
+    if (c) pc = aseAlignPts(pc, !!c.closed, ref);
+    if (b) pb = aseAlignPts(pb, !!b.closed, ref);
+    if (r) pr = aseAlignPts(pr, !!r.closed, ref);
+    if (s) ps = aseAlignPts(ps, !!s.closed, ref);
+    const gC = g ? asePathCentroid(g.pts) : gridCenter;
+    const cC = c ? asePathCentroid(c.pts) : concCenter;
+    const bC = b ? asePathCentroid(b.pts) : barCenter;
+    const rC = r ? asePathCentroid(r.pts) : branchCenter;
+    const sC = s ? asePathCentroid(s.pts) : starCenter;
+    const origin = {
+      x:
+        gC.x * weights.wG +
+        cC.x * weights.wC +
+        bC.x * weights.wB +
+        rC.x * weights.wR +
+        sC.x * weights.wS +
+        rest.x * weights.wRest,
+      y:
+        gC.y * weights.wG +
+        cC.y * weights.wC +
+        bC.y * weights.wB +
+        rC.y * weights.wR +
+        sC.y * weights.wS +
+        rest.y * weights.wRest,
+    };
+    const energy =
+      1 -
+      (weights.wG * weights.wG +
+        weights.wC * weights.wC +
+        weights.wB * weights.wB +
+        weights.wR * weights.wR +
+        weights.wS * weights.wS +
+        weights.wRest * weights.wRest);
+    const pulse = Math.sin(Math.max(0, energy) * Math.PI);
+    const salt =
+      Number(
+        g && g.salt != null
+          ? g.salt
+          : c && c.salt != null
+            ? c.salt
+            : b && b.salt != null
+              ? b.salt
+              : r && r.salt != null
+                ? r.salt
+                : s && s.salt
+      ) || i;
+    const sides = [
+      { pts: pg, w: weights.wG },
+      { pts: pc, w: weights.wC },
+      { pts: pb, w: weights.wB },
+      { pts: pr, w: weights.wR },
+      { pts: ps, w: weights.wS },
+      { pts: null, w: weights.wRest, flat: rest },
+    ];
+    const pts = [];
+    for (let k = 0; k < ASE_MORPH_N; k++) {
+      if (!ASE_LAB.nonlinear) {
+        let x = 0;
+        let y = 0;
+        for (let s = 0; s < sides.length; s++) {
+          const w = sides[s].w;
+          if (w <= 1e-6) continue;
+          const src = sides[s].flat || sides[s].pts[k];
+          x += src.x * w;
+          y += src.y * w;
+        }
+        pts.push({ x, y });
+        continue;
+      }
+      let refA = null;
+      let sr = 0;
+      let cs = 0;
+      let sn = 0;
+      for (let s = 0; s < sides.length; s++) {
+        const w = sides[s].w;
+        if (w <= 1e-6) continue;
+        const src = sides[s].flat || sides[s].pts[k];
+        const dx = src.x - origin.x;
+        const dy = src.y - origin.y;
+        const rad = Math.hypot(dx, dy);
+        let ang = Math.atan2(dy, dx);
+        if (refA == null) refA = ang;
+        else ang = refA + aseAngWrap(ang - refA);
+        sr += rad * w;
+        cs += Math.cos(ang) * w;
+        sn += Math.sin(ang) * w;
+      }
+      const u = ASE_MORPH_N > 1 ? k / (ASE_MORPH_N - 1) : 0;
+      const wave = Math.sin(u * Math.PI * 3 + salt * 0.71);
+      const late = Math.sin((u * 0.85 + 0.08) * Math.PI);
+      let rad = sr;
+      let ang = Math.atan2(sn, cs);
+      rad *= 1 + energy * pulse * 0.8 * (0.11 + 0.09 * wave);
+      ang += energy * pulse * 0.8 * (0.2 * wave + 0.1 * late * Math.sin(salt * 0.33 + u * 7));
+      pts.push({
+        x: origin.x + Math.cos(ang) * rad,
+        y: origin.y + Math.sin(ang) * rad,
+      });
+    }
+    out.push({
+      pts,
+      closed: false,
+      salt:
+        g && g.salt != null
+          ? g.salt
+          : c && c.salt != null
+            ? c.salt
+            : b && b.salt != null
+              ? b.salt
+              : r && r.salt != null
+                ? r.salt
+                : s && s.salt,
+      accent:
+        !!(g && g.accent) ||
+        !!(c && c.accent) ||
+        !!(b && b.accent) ||
+        !!(r && r.accent) ||
+        !!(s && s.accent),
+    });
+  }
+  return out;
+}
+
+function aseMorphCacheKey() {
+  return [
+    aseSeed,
+    ASE_W,
+    ASE_H,
+    ASE_ROWS,
+    ASE_COLS,
+    ASE_MARGIN,
+    ASE_LENMIN,
+    ASE_LENMAX,
+    ASE_ARCS,
+    ASE_RINGS,
+    ASE_RING_GAP,
+    ASE_HOBBS,
+    ASE_RING_COPIES,
+    ASE_RING_SCALE,
+    ASE_BARS,
+    ASE_BAR_H,
+    ASE_BAR_TILT,
+    ASE_BAR_NOISE,
+    ASE_BRANCH_SEEDS,
+    ASE_BRANCH_MAX,
+    ASE_BRANCH_STEP,
+    ASE_BRANCH_NOISE,
+    ASE_BRANCH_DEPTH,
+    ASE_STAR_MIN,
+    ASE_STAR_MAX,
+    ASE_STAR_LEN,
+    ASE_STAR_STEP,
+    ASE_STAR_NOISE,
+    ASE_LAYOUT_N,
+  ].join("|");
+}
+
+function aseMarkLongLayout(grid) {
+  const feats = grid.map((p) => ({
+    p,
+    len: asePathLen(p.pts, !!p.closed),
+  }));
+  feats.sort((a, b) => b.len - a.len);
+  const k = Math.max(1, Math.round(grid.length * 0.1));
+  for (let i = 0; i < feats.length; i++) feats[i].p.accent = i < k;
+}
+
+function aseStampBundleSalts(bundles) {
+  for (let i = 0; i < bundles.length; i++) {
+    const g = bundles[i].grid;
+    const c = bundles[i].conc;
+    const b = bundles[i].bar;
+    const r = bundles[i].branch;
+    const s = bundles[i].star;
+    const salt =
+      g && g.salt != null
+        ? g.salt
+        : c && c.salt != null
+          ? c.salt
+          : b && b.salt != null
+            ? b.salt
+            : r && r.salt != null
+              ? r.salt
+              : s && s.salt != null
+                ? s.salt
+                : i * 1.37;
+    const accent = !!(g && g.accent);
+    if (g) g.salt = salt;
+    if (c) {
+      c.salt = salt;
+      c.accent = accent;
+    }
+    if (b) {
+      b.salt = salt;
+      b.accent = accent;
+    }
+    if (r) {
+      r.salt = salt;
+      r.accent = accent;
+    }
+    if (s) {
+      s.salt = salt;
+      s.accent = accent;
+    }
+  }
+}
+
+function aseEnsureMorphCache() {
+  const key = aseMorphCacheKey();
+  if (aseMorphCache && aseMorphCache.key === key) return aseMorphCache;
+  randomSeed(aseSeed);
+  noiseSeed(aseSeed);
+  const grid = aseCollectGridPaths();
+  randomSeed(aseSeed);
+  noiseSeed(aseSeed);
+  const conc = aseCollectConcentricPaths();
+  randomSeed(aseSeed);
+  noiseSeed(aseSeed);
+  const bars = aseCollectBarcodePaths();
+  randomSeed(aseSeed);
+  noiseSeed(aseSeed);
+  const branches = aseCollectBranchPaths();
+  randomSeed(aseSeed);
+  noiseSeed(aseSeed);
+  const stars = aseCollectStarPaths();
+  aseMarkLongLayout(grid);
+  const bundles = aseMatchBundles(grid, conc, bars, branches, stars);
+  aseStampBundleSalts(bundles);
+  aseMorphCache = { key, grid, conc, bars, branches, stars, bundles };
+  return aseMorphCache;
+}
+
+function aseLayoutWeight(key) {
+  return aseClamp(ASE_LAB[key], 0, 1, 0);
+}
+
+/** 同一條線在五套造型間插值；只開一端則用該端原路徑。 */
+function aseCollectPaths() {
+  const pack = aseEnsureMorphCache();
+  const wG = aseLayoutWeight("gridT");
+  const wC = aseLayoutWeight("concT");
+  const wB = aseLayoutWeight("barT");
+  const wR = aseLayoutWeight("branchT");
+  const wS = aseLayoutWeight("starT");
+  const live =
+    (wG > 1e-6 ? 1 : 0) +
+    (wC > 1e-6 ? 1 : 0) +
+    (wB > 1e-6 ? 1 : 0) +
+    (wR > 1e-6 ? 1 : 0) +
+    (wS > 1e-6 ? 1 : 0);
+  if (live === 0) return [];
+  if (live === 1 && wG >= 1) return pack.grid;
+  if (live === 1 && wC >= 1) return pack.conc;
+  if (live === 1 && wB >= 1) return pack.bars;
+  if (live === 1 && wR >= 1) return pack.branches;
+  if (live === 1 && wS >= 1) return pack.stars;
+  return aseMorphBundles(pack.bundles, pack, aseMorphWeights());
+}
+
+function aseLayoutCaption() {
+  const bits = [];
+  if (aseLayoutWeight("gridT") > 0) {
+    bits.push("grid " + aseLayoutWeight("gridT").toFixed(2));
+  }
+  if (aseLayoutWeight("concT") > 0) {
+    bits.push("conc " + aseLayoutWeight("concT").toFixed(2));
+  }
+  if (aseLayoutWeight("barT") > 0) {
+    bits.push("bar " + aseLayoutWeight("barT").toFixed(2));
+  }
+  if (aseLayoutWeight("branchT") > 0) {
+    bits.push("branch " + aseLayoutWeight("branchT").toFixed(2));
+  }
+  if (aseLayoutWeight("starT") > 0) {
+    bits.push("star " + aseLayoutWeight("starT").toFixed(2));
+  }
+  if (!bits.length) return "none";
+  return bits.length > 1 ? "morph " + bits.join(" · ") : bits[0];
 }
 
 function aseScalePts(pts, mul) {
@@ -514,36 +1714,54 @@ function aseScalePts(pts, mul) {
   return out;
 }
 
+function aseStrokeLen(st) {
+  const pts = st && st.pts;
+  if (!pts || pts.length < 2) return 0;
+  let n = 0;
+  for (let i = 1; i < pts.length; i++) {
+    n += Math.hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y);
+  }
+  return n;
+}
+
 function aseMarkAccent(strokes) {
   if (!strokes || !strokes.length) return;
   for (let i = 0; i < strokes.length; i++) strokes[i].accent = false;
-  const k = Math.max(1, Math.round(strokes.length * 0.1));
-  const idx = [];
-  for (let i = 0; i < strokes.length; i++) idx.push(i);
-  let s = (aseSeed >>> 0) ^ 0x9e3779b9;
-  const rnd = function () {
-    s = (Math.imul(s, 1664525) + 1013904223) >>> 0;
-    return s / 4294967296;
-  };
-  for (let i = idx.length - 1; i > 0; i--) {
-    const j = Math.floor(rnd() * (i + 1));
-    const t = idx[i];
-    idx[i] = idx[j];
-    idx[j] = t;
+  const groups = {};
+  for (let i = 0; i < strokes.length; i++) {
+    const st = strokes[i];
+    if (!st || !st.pathAccent) continue;
+    const key = String(st.pathSalt);
+    if (!groups[key]) groups[key] = [];
+    groups[key].push(st);
   }
-  for (let i = 0; i < k; i++) {
-    const st = strokes[idx[i]];
-    st.accent = true;
-    st.pts = aseScalePts(st.pts, 2);
-  }}
+  const keys = Object.keys(groups);
+  for (let i = 0; i < keys.length; i++) {
+    const bits = groups[keys[i]];
+    let best = bits[0];
+    let bestL = aseStrokeLen(best);
+    for (let j = 1; j < bits.length; j++) {
+      const L = aseStrokeLen(bits[j]);
+      if (L > bestL) {
+        best = bits[j];
+        bestL = L;
+      }
+    }
+    if (best) {
+      best.accent = true;
+      best.pts = aseScalePts(best.pts, 2);
+    }
+  }
+}
 
 function aseInkColor(stroke) {
-  return stroke && stroke.accent ? color(196, 28, 28) : color(0);
+  if (stroke && stroke.accent && ASE_LAB.white !== false) return color(255);
+  return color(50);
 }
 
 function asePaintPencilPath(stroke) {
   const pts = stroke && stroke.pts ? stroke.pts : stroke;
-  if (!pts || pts.length < 2) return;
+  if (!pts || pts.length < 2) return null;
   const glPts = [];
   for (let i = 0; i < pts.length; i++) {
     glPts.push(aseToGl(pts[i]));
@@ -552,8 +1770,42 @@ function asePaintPencilPath(stroke) {
   const w = Number.isFinite(sw) ? Math.max(0.45, sw) : 2.4;
   const dens = Number(stroke && stroke.dens);
   const ink = aseInkColor(stroke);
-  drawStroke(glPts, w, img, ink, dens);
-  drawStroke(glPts, Math.max(0.35, w * 0.55), img, ink, dens);
+  let widths = null;
+  if (stroke && stroke.taper) {
+    widths = [];
+    for (let i = 0; i < glPts.length; i++) {
+      widths.push(aseTaperWeight(i, glPts.length, 1, w));
+    }
+  }
+  drawStroke(glPts, w, img, ink, dens, widths);
+  const hold = aseRng(aseHashSeed(aseSeed, w * 13 + (Number.isFinite(dens) ? dens : 0) * 7));
+  if (glPts.length < 3 || hold() >= 0.2 * 0.7) return null;
+  const n = glPts.length;
+  const keep = Math.max(2, Math.round(n * (0.15 + hold() * 0.55)));
+  const start = Math.floor(hold() * (n - keep + 1));
+  return { pts: glPts.slice(start, start + keep), w, dens, ink };
+}
+
+function asePaintInkAccents(strokes) {
+  if (!strokes || !strokes.length) return;
+  push();
+  aseFlip2D();
+  noFill();
+  strokeCap(ROUND);
+  strokeJoin(ROUND);
+  for (let i = 0; i < strokes.length; i++) {
+    const st = strokes[i];
+    if (!st || !st.accent || !st.pts || st.pts.length < 2) continue;
+    stroke(aseInkColor(st));
+    const sw = Number(st.sw);
+    const w = Number.isFinite(sw) ? Math.max(0.45, sw) : 1.15;
+    if (st.taper) aseStrokeTaperOpen(st.pts, 1, w);
+    else {
+      strokeWeight(w);
+      MixVein.strokeOpen(st.pts);
+    }
+  }
+  pop();
 }
 
 function asePaintInkStrokes(strokes) {
@@ -568,8 +1820,12 @@ function asePaintInkStrokes(strokes) {
     if (!st || !st.pts || st.pts.length < 2) continue;
     const sw = Number(st.sw);
     stroke(aseInkColor(st));
-    strokeWeight(Number.isFinite(sw) ? Math.max(0.45, sw) : 1.15);
+    const w = Number.isFinite(sw) ? Math.max(0.45, sw) : 1.15;
+    if (st.taper) aseStrokeTaperOpen(st.pts, 1, w);
+    else {
+      strokeWeight(w);
     MixVein.strokeOpen(st.pts);
+    }
   }
   pop();
 }
@@ -584,7 +1840,15 @@ function aseDrawPathGuides(paths) {
   stroke(220, 40, 40, 160);
   strokeWeight(1.4);
   for (let i = 0; i < paths.length; i++) {
+    if (paths[i].closed) {
+      beginShape();
+      for (let j = 0; j < paths[i].pts.length; j++) {
+        vertex(paths[i].pts[j].x, paths[i].pts[j].y);
+      }
+      endShape(CLOSE);
+    } else {
     MixVein.strokeOpen(paths[i].pts);
+    }
   }
   pop();
 }
@@ -595,7 +1859,9 @@ function aseDrawCaption() {
   textAlign(LEFT, TOP);
   textSize(11);
   text(
-    "asemic · 線／葉 " +
+    "asemic · " +
+      aseLayoutCaption() +
+      " · 線／葉 " +
       ASE_LAB.leafShare.toFixed(2) +
       " · 葉長 " +
       ASE_LAB.leafLen.toFixed(2) +
@@ -606,9 +1872,8 @@ function aseDrawCaption() {
       " · 曲線／三角 " +
       ASE_LAB.leafTri.toFixed(2) +
       (ASE_LAB.randPath ? " · 每徑不同" : "") +
-      (ASE_LAB.pencil
-        ? " · 鉛筆 · 質感 " + Number(ASE_LAB.pencilDens).toFixed(2)
-        : "") +
+      (ASE_LAB.nonlinear ? " · 非線性" : " · 線性") +
+      (ASE_LAB.brush === false ? " · 無筆刷" : ASE_LAB.pencil ? " · 鉛筆" : "") +
       (ASE_LAB.live !== false ? " · 即時" : " · 凍結") +
       " · seed " +
       aseSeed,
@@ -629,29 +1894,48 @@ function aseOverlayFromBake() {
 
 function asePaint() {
   const paths = aseCollectPaths();
+  const showBrush = ASE_LAB.brush !== false;
+  if (!showBrush) {
+    background(ASE_PAPER[0], ASE_PAPER[1], ASE_PAPER[2]);
+  } else {
   const wantPencil = !!ASE_LAB.pencil;
   const strokes = [];
   for (let i = 0; i < paths.length; i++) {
-    const opts = Object.assign(asePathOpts(paths[i].salt), { showPath: false });
+      const salt = paths[i].salt;
+      const veinSeed = aseHashSeed(aseSeed, (salt || 0) + 17.3);
+      randomSeed(veinSeed);
+      noiseSeed(veinSeed);
+      const opts = Object.assign(asePathOpts(salt), { showPath: false });
     const bits = MixVein.collect(
-      { pts: paths[i].pts, closed: false },
+        { pts: paths[i].pts, closed: !!paths[i].closed },
       opts
     );
-    const dens = constrain(Number(ASE_LAB.pencilDens), 3, 6);
+      const dens = ASE_PENCIL_DENS;
     for (let j = 0; j < bits.length; j++) {
       bits[j].dens = dens;
+        bits[j].pathSalt = salt;
+        bits[j].pathAccent = !!paths[i].accent;
       strokes.push(bits[j]);
     }
   }
   aseMarkAccent(strokes);
+    aseMarkTaper(strokes);
   asePencilReady = wantPencil && aseBeginPencil();
   if (!asePencilReady) {
     asePaintInkStrokes(strokes);
   } else {
+      const extras = [];
     for (let i = 0; i < strokes.length; i++) {
-      asePaintPencilPath(strokes[i]);
+        if (ASE_LAB.white !== false && strokes[i] && strokes[i].accent) continue;
+        const extra = asePaintPencilPath(strokes[i]);
+        if (extra) extras.push(extra);
+      }
+      for (let i = 0; i < extras.length; i++) {
+        drawStroke(extras[i].pts, extras[i].w, img, extras[i].ink, extras[i].dens);
     }
     aseEndPencil();
+      if (ASE_LAB.white !== false) asePaintInkAccents(strokes);
+    }
   }
   aseBake = get();
   aseBakePaths = paths;
@@ -729,13 +2013,17 @@ function wireAseFloatUi() {
   aseBindRange("lab-leaf-len", "lab-leaf-len-v", "leafLen", 0.05, 5, 2);
   aseBindRange("lab-leaf-wid", "lab-leaf-wid-v", "leafWid", 1, 3, 2);
   aseBindRange("lab-leaf-dens", "lab-leaf-dens-v", "leafDens", 1, 2, 2);
-  aseBindRange("lab-leaf-sw", "lab-leaf-sw-v", "leafSw", 0.5, 12, 2);
-  aseBindRange("lab-line-sw", "lab-line-sw-v", "lineSw", 0.5, 12, 2);
-  aseBindRange("lab-pencil-dens", "lab-pencil-dens-v", "pencilDens", 3, 6, 2);
+  aseBindRange("lab-leaf-sw", "lab-leaf-sw-v", "leafSw", 0.5, 6, 2);
+  aseBindRange("lab-line-sw", "lab-line-sw-v", "lineSw", 0.5, 6, 2);
   aseBindRange("lab-leaf-tri", null, "leafTri", 0, 1, 2);
   aseBindRange("lab-leaf-vein", null, "leafVein", 0, 1, 2);
   aseBindRange("lab-leaf-off", "lab-leaf-off-v", "leafOff", -1, 1, 2);
   aseBindRange("lab-leaf-pad", null, "leafPad", 0, 1, 2);
+  aseBindRange("lab-grid", "lab-grid-v", "gridT", 0, 1, 2);
+  aseBindRange("lab-conc", "lab-conc-v", "concT", 0, 1, 2);
+  aseBindRange("lab-bar", "lab-bar-v", "barT", 0, 1, 2);
+  aseBindRange("lab-branch", "lab-branch-v", "branchT", 0, 1, 2);
+  aseBindRange("lab-star", "lab-star-v", "starT", 0, 1, 2);
 
   const pathEl = document.getElementById("lab-path");
   if (pathEl) {
@@ -758,11 +2046,41 @@ function wireAseFloatUi() {
     });
   }
 
+  const nonlinearEl = document.getElementById("lab-nonlinear");
+  if (nonlinearEl) {
+    nonlinearEl.checked = !!ASE_LAB.nonlinear;
+    nonlinearEl.addEventListener("change", () => {
+      ASE_LAB.nonlinear = !!nonlinearEl.checked;
+      aseSaveLs();
+      redraw();
+    });
+  }
+
+  const brushEl = document.getElementById("lab-brush");
+  if (brushEl) {
+    brushEl.checked = ASE_LAB.brush !== false;
+    brushEl.addEventListener("change", () => {
+      ASE_LAB.brush = !!brushEl.checked;
+      aseSaveLs();
+      redraw();
+    });
+  }
+
   const pencilEl = document.getElementById("lab-pencil");
   if (pencilEl) {
     pencilEl.checked = !!ASE_LAB.pencil;
     pencilEl.addEventListener("change", () => {
       ASE_LAB.pencil = !!pencilEl.checked;
+      aseSaveLs();
+      redraw();
+    });
+  }
+
+  const whiteEl = document.getElementById("lab-white");
+  if (whiteEl) {
+    whiteEl.checked = ASE_LAB.white !== false;
+    whiteEl.addEventListener("change", () => {
+      ASE_LAB.white = !!whiteEl.checked;
       aseSaveLs();
       redraw();
     });
@@ -833,6 +2151,14 @@ function draw() {
   randomSeed(aseSeed);
   noiseSeed(aseSeed);
   asePaint();
+}
+
+function mousePressed() {
+  if (mouseButton !== LEFT) return;
+  const t = typeof event !== "undefined" && event && event.target;
+  if (t && t.closest && t.closest("#pen-float")) return;
+  aseNewSeed();
+  redraw();
 }
 
 function keyPressed() {
@@ -934,7 +2260,6 @@ void main(void)
   vec2 crd = (gl_FragCoord.xy) / resolution.xy;
   float v = snoise(vec3(crd * vec2(1.0, 4.0), 0.0)) + 0.5;
   v += snoise(vec3(crd * vec2(164.0, 164.0), 0.0)) * 2.0;
-  v = clamp((v - 0.18) * 2.7, 0.0, 1.0);
   gl_FragColor = vec4(vec3(v), 1.0);
 }`;
 
@@ -957,15 +2282,13 @@ void main(void)
 {
     vec2 crd = vTexCoord * size;
     float e = edge(crd.y, size.y, 4.0);
-    // 密度＝沿線顆粒像素：3 ≈ 2.5px，6 ≈ 1.2px
-    float gpx = 8.0 * pow(1.0 / max(texZoom, 3.0), 1.05);
-    vec2 uv = crd / max(gpx * 164.0, 0.001);
-    vec4 samp = texture2D(tex0, uv);
-    float g = (samp.r - 0.06) * 1.85;
-    float lev = smoothstep(0.0, 0.48, max(0.0, g - e));
-    lev = pow(clamp(lev, 0.0, 1.0), 0.55);
-    vec4 color = vec4(strokeColor, 1.0) * lev;
-    gl_FragColor = color;
+    vec4 samp = texture2D(tex0, vTexCoord);
+    float lev = smoothstep(0.0, 1.0, max(0.0, samp.r - e));
+    float peak = texture2D(tex0, vTexCoord + vec2(0.17, 0.31)).r;
+    float crush = smoothstep(0.35, 0.65, lev) * step(0.3, peak);
+    vec3 ink = mix(strokeColor, vec3(0.0), crush);
+    float amt = mix(lev, 1.0, crush);
+    gl_FragColor = vec4(ink, 1.0) * amt;
 }`;
 
 

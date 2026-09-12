@@ -162,6 +162,18 @@ canvas {
   grid-template-columns: 2.2rem 1fr 2.2rem;
 }
 
+#pen-float .layout-slides {
+  display: grid;
+  gap: 0.4rem;
+  margin: 0.45rem 0 0.55rem;
+}
+
+#pen-float .layout-slides .slide {
+  grid-template-columns: 5.4rem 1fr 2.2rem;
+  font-size: 0.72rem;
+  color: var(--panel-text);
+}
+
 #pen-float .lab .slide,
 #pen-float .slide {
   display: grid;
