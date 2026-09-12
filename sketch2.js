@@ -750,6 +750,7 @@ function aseCollectGridPaths() {
             pts,
             salt: row * 17.3 + col * 0.41 + k * 3.1,
             closed: false,
+            hub: { x, y },
           });
         }
       }
@@ -768,6 +769,7 @@ function aseCollectGridPaths() {
         pts,
         salt: row * 17.3 + col * 0.41 + (arcs + extra) * 3.1,
         closed: false,
+        hub: { x, y },
       });
     }
     extra++;
@@ -828,6 +830,7 @@ function aseCollectConcentricPaths() {
       if (pts.length < 2) continue;
       const bits = aseSplitRing(pts, salt);
       for (let b = 0; b < bits.length; b++) {
+        bits[b].hub = { x: cx, y: cy };
         paths.push(bits[b]);
       }
     }
@@ -846,7 +849,10 @@ function aseCollectConcentricPaths() {
     extra++;
     if (pts.length < 2) continue;
     const bits = aseSplitRing(pts, salt);
-    for (let b = 0; b < bits.length; b++) paths.push(bits[b]);
+    for (let b = 0; b < bits.length; b++) {
+      bits[b].hub = { x: cx, y: cy };
+      paths.push(bits[b]);
+    }
   }
   return aseCapPaths(paths, ASE_LAYOUT_N);
 }
@@ -902,8 +908,9 @@ function aseCollectBarcodePaths() {
       if (pts.length >= 2) {
         paths.push({
           pts,
-        closed: false,
-        salt,
+          closed: false,
+          salt,
+          hub: { x, y: cy },
         });
       }
     }
@@ -1011,6 +1018,7 @@ function aseCollectBranchPaths() {
       pts: done[i].pts,
       closed: false,
       salt: 220 + i * 2.17,
+      hub: { x: cx, y: cy },
     });
   }
   let pad = 0;
@@ -1033,6 +1041,7 @@ function aseCollectBranchPaths() {
       pts,
       closed: false,
       salt: 220 + paths.length * 2.17,
+      hub: { x: cx, y: cy },
     });
     pad++;
   }
@@ -1114,6 +1123,7 @@ function aseCollectStarPaths() {
         pts,
         closed: false,
         salt: 330 + paths.length * 2.17,
+        hub: { x: c.x, y: c.y },
       });
     }
   }
@@ -1143,6 +1153,35 @@ function asePathsCentroid(paths) {
     sy += c.y;
   }
   return { x: sx / paths.length, y: sy / paths.length };
+}
+
+function asePackHub(paths) {
+  if (!paths || !paths.length) return { x: ASE_W * 0.5, y: ASE_H * 0.5 };
+  let sx = 0;
+  let sy = 0;
+  let n = 0;
+  let first = null;
+  let same = true;
+  for (let i = 0; i < paths.length; i++) {
+    const h = paths[i] && paths[i].hub;
+    if (!h || !Number.isFinite(h.x) || !Number.isFinite(h.y)) continue;
+    if (!first) first = h;
+    else if (Math.hypot(h.x - first.x, h.y - first.y) > 1) same = false;
+    sx += h.x;
+    sy += h.y;
+    n++;
+  }
+  if (n && same) return { x: first.x, y: first.y };
+  if (n) return { x: sx / n, y: sy / n };
+  return asePathsCentroid(paths);
+}
+
+function asePathHub(path, fallback) {
+  const h = path && path.hub;
+  if (h && Number.isFinite(h.x) && Number.isFinite(h.y)) {
+    return { x: h.x, y: h.y };
+  }
+  return fallback || { x: ASE_W * 0.5, y: ASE_H * 0.5 };
 }
 
 function asePathLen(pts, closed) {
@@ -1400,12 +1439,11 @@ function aseMorphWeights() {
 function aseMorphBundles(bundles, pack, weights) {
   const list = bundles || [];
   if (!list.length) return [];
-  const gridCenter = asePathsCentroid(pack.grid);
-  const concCenter = asePathsCentroid(pack.conc);
-  const barCenter = asePathsCentroid(pack.bars);
-  const branchCenter = asePathsCentroid(pack.branches);
-  const starCenter = asePathsCentroid(pack.stars);
-  const rest = { x: ASE_W * 0.5, y: ASE_H * 0.5 };
+  const gridHub0 = asePackHub(pack.grid);
+  const concHub0 = asePackHub(pack.conc);
+  const barHub0 = asePackHub(pack.bars);
+  const branchHub0 = asePackHub(pack.branches);
+  const starHub0 = asePackHub(pack.stars);
   const out = [];
   for (let i = 0; i < list.length; i++) {
     const g = list[i].grid;
@@ -1413,38 +1451,42 @@ function aseMorphBundles(bundles, pack, weights) {
     const b = list[i].bar;
     const r = list[i].branch;
     const s = list[i].star;
-    let pg = aseSampleSide(g, g && g.closed, gridCenter);
-    let pc = aseSampleSide(c, c && c.closed, concCenter);
-    let pb = aseSampleSide(b, b && b.closed, barCenter);
-    let pr = aseSampleSide(r, r && r.closed, branchCenter);
-    let ps = aseSampleSide(s, s && s.closed, starCenter);
+    const gHub = asePathHub(g, gridHub0);
+    const cHub = asePathHub(c, concHub0);
+    const bHub = asePathHub(b, barHub0);
+    const rHub = asePathHub(r, branchHub0);
+    const sHub = asePathHub(s, starHub0);
+    let pg = aseSampleSide(g, g && g.closed, gHub);
+    let pc = aseSampleSide(c, c && c.closed, cHub);
+    let pb = aseSampleSide(b, b && b.closed, bHub);
+    let pr = aseSampleSide(r, r && r.closed, rHub);
+    let ps = aseSampleSide(s, s && s.closed, sHub);
     if (!pg || !pc || !pb || !pr || !ps) continue;
     const ref = g ? pg[0] : c ? pc[0] : b ? pb[0] : r ? pr[0] : ps[0];
     if (c) pc = aseAlignPts(pc, !!c.closed, ref);
     if (b) pb = aseAlignPts(pb, !!b.closed, ref);
     if (r) pr = aseAlignPts(pr, !!r.closed, ref);
     if (s) ps = aseAlignPts(ps, !!s.closed, ref);
-    const gC = g ? asePathCentroid(g.pts) : gridCenter;
-    const cC = c ? asePathCentroid(c.pts) : concCenter;
-    const bC = b ? asePathCentroid(b.pts) : barCenter;
-    const rC = r ? asePathCentroid(r.pts) : branchCenter;
-    const sC = s ? asePathCentroid(s.pts) : starCenter;
-    const origin = {
-      x:
-        gC.x * weights.wG +
-        cC.x * weights.wC +
-        bC.x * weights.wB +
-        rC.x * weights.wR +
-        sC.x * weights.wS +
-        rest.x * weights.wRest,
-      y:
-        gC.y * weights.wG +
-        cC.y * weights.wC +
-        bC.y * weights.wB +
-        rC.y * weights.wR +
-        sC.y * weights.wS +
-        rest.y * weights.wRest,
-    };
+    const live = [
+      { pts: pg, w: weights.wG, hub: gHub },
+      { pts: pc, w: weights.wC, hub: cHub },
+      { pts: pb, w: weights.wB, hub: bHub },
+      { pts: pr, w: weights.wR, hub: rHub },
+      { pts: ps, w: weights.wS, hub: sHub },
+    ];
+    let hx = 0;
+    let hy = 0;
+    let hw = 0;
+    for (let s = 0; s < live.length; s++) {
+      if (live[s].w <= 1e-6) continue;
+      hx += live[s].hub.x * live[s].w;
+      hy += live[s].hub.y * live[s].w;
+      hw += live[s].w;
+    }
+    const H =
+      hw > 1e-6
+        ? { x: hx / hw, y: hy / hw }
+        : { x: ASE_W * 0.5, y: ASE_H * 0.5 };
     const energy =
       1 -
       (weights.wG * weights.wG +
@@ -1466,26 +1508,20 @@ function aseMorphBundles(bundles, pack, weights) {
                 ? r.salt
                 : s && s.salt
       ) || i;
-    const sides = [
-      { pts: pg, w: weights.wG },
-      { pts: pc, w: weights.wC },
-      { pts: pb, w: weights.wB },
-      { pts: pr, w: weights.wR },
-      { pts: ps, w: weights.wS },
-      { pts: null, w: weights.wRest, flat: rest },
-    ];
     const pts = [];
     for (let k = 0; k < ASE_MORPH_N; k++) {
       if (!ASE_LAB.nonlinear) {
         let x = 0;
         let y = 0;
-        for (let s = 0; s < sides.length; s++) {
-          const w = sides[s].w;
+        for (let s = 0; s < live.length; s++) {
+          const w = live[s].w;
           if (w <= 1e-6) continue;
-          const src = sides[s].flat || sides[s].pts[k];
+          const src = live[s].pts[k];
           x += src.x * w;
           y += src.y * w;
         }
+        x += H.x * weights.wRest;
+        y += H.y * weights.wRest;
         pts.push({ x, y });
         continue;
       }
@@ -1493,12 +1529,13 @@ function aseMorphBundles(bundles, pack, weights) {
       let sr = 0;
       let cs = 0;
       let sn = 0;
-      for (let s = 0; s < sides.length; s++) {
-        const w = sides[s].w;
+      for (let s = 0; s < live.length; s++) {
+        const w = live[s].w;
         if (w <= 1e-6) continue;
-        const src = sides[s].flat || sides[s].pts[k];
-        const dx = src.x - origin.x;
-        const dy = src.y - origin.y;
+        const src = live[s].pts[k];
+        const hub = live[s].hub;
+        const dx = src.x - hub.x;
+        const dy = src.y - hub.y;
         const rad = Math.hypot(dx, dy);
         let ang = Math.atan2(dy, dx);
         if (refA == null) refA = ang;
@@ -1515,8 +1552,8 @@ function aseMorphBundles(bundles, pack, weights) {
       rad *= 1 + energy * pulse * 0.8 * (0.11 + 0.09 * wave);
       ang += energy * pulse * 0.8 * (0.2 * wave + 0.1 * late * Math.sin(salt * 0.33 + u * 7));
       pts.push({
-        x: origin.x + Math.cos(ang) * rad,
-        y: origin.y + Math.sin(ang) * rad,
+        x: H.x + Math.cos(ang) * rad,
+        y: H.y + Math.sin(ang) * rad,
       });
     }
     out.push({
