@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Vein Leaves</title>
+    <script src="https://cdn.jsdelivr.net/npm/p5@1.7.0/lib/p5.min.js"></script>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <aside id="pen-float" aria-label="Vein Leaves">
+      <div class="float-head">
+        <h1>Vein Leaves</h1>
+        <button
+          type="button"
+          class="icon"
+          id="pen-float-toggle"
+          aria-expanded="true"
+        >
+          收合
+        </button>
+      </div>
+      <div class="float-body">
+        <p class="note">
+          沿路徑交錯鋪線與葉子：<code>----AA---A---</code>
+          Space 清空 · 拖曳畫線（放開鎖定該筆）· 亂數效果＝每筆重抽滑桿 · S 存 ·
+          U 面板
+        </p>
+        <h2>節奏</h2>
+        <table>
+          <tbody>
+            <tr>
+              <th>線</th>
+              <td class="api">----</td>
+              <td>實線＋Perlin 法向左右抖</td>
+            </tr>
+            <tr>
+              <th>葉</th>
+              <td class="api">A／AA</td>
+              <td>間距忽近忽遠；缺口補線</td>
+            </tr>
+            <tr>
+              <th>小葉</th>
+              <td class="api">curve／三角</td>
+              <td>葉緣曲線或兩直線；滑桿可改葉脈</td>
+            </tr>
+          </tbody>
+        </table>
+        <h2>造型路徑</h2>
+        <div class="togs vein-path-row">
+          <label class="tog">
+            <input id="lab-path" type="checkbox" />
+            顯示造型路徑
+          </label>
+          <div class="vein-path-actions">
+            <button type="button" class="icon" id="lab-copy" title="複製參數 JSON">
+              複製
+            </button>
+            <button type="button" class="icon" id="lab-load" title="載入參數 JSON">
+              Load
+            </button>
+          </div>
+          <input
+            id="lab-load-json"
+            type="file"
+            accept="application/json,.json"
+            hidden
+          />
+        </div>
+        <div class="lab">
+          <label class="share">
+            <span>線</span>
+            <input
+              id="lab-leaf-share"
+              type="range"
+              min="0"
+              max="1"
+              step="0.01"
+              value="0.5"
+            />
+            <span>葉子</span>
+          </label>
+          <p class="share-read">
+            線 <span id="lab-share-line">50%</span>
+            · 葉 <span id="lab-share-leaf">50%</span>
+            · <span class="val" id="lab-leaf-share-v">0.50</span>
+          </p>
+          <label class="slide">
+            <span>補線缺口</span>
+            <input
+              id="lab-gap-fill"
+              type="range"
+              min="2"
+              max="60"
+              step="1"
+              value="30"
+            />
+            <span class="val" id="lab-gap-fill-v">30</span>
+          </label>
+          <label class="slide">
+            <span>葉子長度</span>
+            <input
+              id="lab-leaf-len"
+              type="range"
+              min="0.05"
+              max="5"
+              step="0.05"
+              value="1"
+            />
+            <span class="val" id="lab-leaf-len-v">1.00</span>
+          </label>
+          <label class="slide">
+            <span>葉子寬度</span>
+            <input
+              id="lab-leaf-wid"
+              type="range"
+              min="1"
+              max="3"
+              step="0.05"
+              value="1"
+            />
+            <span class="val" id="lab-leaf-wid-v">1.00</span>
+          </label>
+          <label class="slide">
+            <span>葉子密度</span>
+            <input
+              id="lab-leaf-dens"
+              type="range"
+              min="1"
+              max="2"
+              step="0.05"
+              value="1"
+            />
+            <span class="val" id="lab-leaf-dens-v">1.00</span>
+          </label>
+          <label class="slide">
+            <span>葉子線寬</span>
+            <input
+              id="lab-leaf-sw"
+              type="range"
+              min="1"
+              max="4"
+              step="0.05"
+              value="1"
+            />
+            <span class="val" id="lab-leaf-sw-v">1.00</span>
+          </label>
+          <label class="slide">
+            <span>直線線寬</span>
+            <input
+              id="lab-line-sw"
+              type="range"
+              min="1"
+              max="4"
+              step="0.05"
+              value="1"
+            />
+            <span class="val" id="lab-line-sw-v">1.00</span>
+          </label>
+          <label class="share vein-mode">
+            <span>曲線</span>
+            <input
+              id="lab-leaf-tri"
+              type="range"
+              min="0"
+              max="1"
+              step="0.01"
+              value="0"
+            />
+            <span>三角</span>
+          </label>
+          <label class="share vein-mode">
+            <span>葉緣</span>
+            <input
+              id="lab-leaf-vein"
+              type="range"
+              min="0"
+              max="1"
+              step="0.01"
+              value="0"
+            />
+            <span>葉脈</span>
+          </label>
+          <label class="share vein-mode">
+            <span>內</span>
+            <input
+              id="lab-leaf-off"
+              type="range"
+              min="-1"
+              max="1"
+              step="0.01"
+              value="0"
+            />
+            <span>外</span>
+          </label>
+          <p class="share-read">
+            葉子離路徑
+            <span class="val" id="lab-leaf-off-v">0.00</span>
+            （−1 往內 · 0 貼邊 · 1 往外）
+          </p>
+          <label class="share vein-mode">
+            <span>接上</span>
+            <input
+              id="lab-leaf-pad"
+              type="range"
+              min="0"
+              max="1"
+              step="0.01"
+              value="1"
+            />
+            <span>留空</span>
+          </label>
+        </div>
+        <label class="row-check">
+          <input id="lab-shapes" type="checkbox" checked />
+          <span>顯示基本型預覽</span>
+        </label>
+        <label class="row-check">
+          <input id="lab-rand-fx" type="checkbox" />
+          <span>亂數效果（每筆新線重抽滑桿）</span>
+        </label>
+        <div class="run-row">
+          <button type="button" class="gen" id="lab-reseed">新種子</button>
+          <button type="button" class="gen" id="lab-clear-paths">
+            清空路徑
+          </button>
+        </div>
+      </div>
+    </aside>
+    <script src="mix-vein.js"></script>
+    <script src="sketch.js"></script>
+  </body>
+</html>

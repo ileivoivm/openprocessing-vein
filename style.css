@@ -1,0 +1,229 @@
+:root {
+  --panel-bg: rgba(28, 28, 26, 0.92);
+  --panel-line: rgba(255, 248, 235, 0.14);
+  --panel-text: #f2ebe0;
+  --panel-muted: #a89f90;
+  --panel-accent: #c4b59a;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background: #1e1e1e;
+  min-height: 100vh;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  font-family: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+}
+
+canvas {
+  display: block;
+  max-width: 100vw;
+  max-height: 100vh;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
+}
+
+#pen-float {
+  position: fixed;
+  top: 12px;
+  right: 12px;
+  z-index: 40;
+  width: min(21rem, calc(100vw - 24px));
+  max-height: calc(100vh - 24px);
+  display: flex;
+  flex-direction: column;
+  color: var(--panel-text);
+  background: var(--panel-bg);
+  border: 1px solid var(--panel-line);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(10px);
+  overflow: hidden;
+}
+
+#pen-float .float-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.7rem 0.85rem;
+  border-bottom: 1px solid var(--panel-line);
+}
+
+#pen-float .float-head h1 {
+  margin: 0;
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--panel-accent);
+}
+
+#pen-float .float-body {
+  overflow: auto;
+  padding: 0.75rem 0.85rem 1rem;
+}
+
+#pen-float.collapsed .float-body {
+  display: none;
+}
+
+#pen-float button.icon,
+#pen-float button.gen {
+  appearance: none;
+  border: 1px solid var(--panel-line);
+  background: transparent;
+  color: var(--panel-text);
+  font: inherit;
+  font-size: 0.75rem;
+  padding: 0.25rem 0.55rem;
+  cursor: pointer;
+}
+
+#pen-float button.gen {
+  margin-top: 0.55rem;
+  padding: 0.4rem 0.7rem;
+}
+
+#pen-float .run-row {
+  display: flex;
+  gap: 0.45rem;
+  margin-top: 0.55rem;
+}
+
+#pen-float .run-row button.gen {
+  margin-top: 0;
+  flex: 1;
+}
+
+#pen-float h2 {
+  margin: 0.85rem 0 0.4rem;
+  font-size: 0.72rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--panel-muted);
+}
+
+#pen-float h2:first-child {
+  margin-top: 0;
+}
+
+#pen-float .note {
+  margin: 0 0 0.5rem;
+  font-size: 0.78rem;
+  line-height: 1.45;
+  color: var(--panel-muted);
+}
+
+#pen-float code {
+  font-size: 0.72rem;
+}
+
+#pen-float table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.72rem;
+}
+
+#pen-float th,
+#pen-float td {
+  border-top: 1px solid var(--panel-line);
+  padding: 0.35rem 0.25rem;
+  text-align: left;
+  vertical-align: top;
+}
+
+#pen-float th {
+  color: var(--panel-muted);
+  width: 28%;
+}
+
+#pen-float td.api {
+  color: var(--panel-accent);
+}
+
+#pen-float .lab {
+  display: grid;
+  gap: 0.45rem;
+  margin-top: 0.55rem;
+  font-size: 0.72rem;
+}
+
+#pen-float .lab .share {
+  display: grid;
+  grid-template-columns: 1.6rem 1fr 2.2rem;
+  gap: 0.45rem;
+  align-items: center;
+  color: var(--panel-text);
+}
+
+#pen-float .lab .vein-mode {
+  grid-template-columns: 2.2rem 1fr 2.2rem;
+}
+
+#pen-float .lab .slide,
+#pen-float .slide {
+  display: grid;
+  grid-template-columns: 4.4rem 1fr 2.2rem;
+  gap: 0.45rem;
+  align-items: center;
+  color: var(--panel-muted);
+}
+
+#pen-float .lab .share-read {
+  margin: 0;
+  color: var(--panel-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+#pen-float .lab .val {
+  color: var(--panel-accent);
+}
+
+#pen-float .row-check {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  color: var(--panel-text);
+  margin-top: 0.55rem;
+  font-size: 0.8rem;
+}
+
+#pen-float .togs {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+#pen-float .vein-path-row {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+#pen-float .vein-path-row .tog {
+  flex: 1;
+  min-width: 0;
+}
+
+#pen-float .vein-path-actions {
+  display: flex;
+  gap: 0.35rem;
+  flex-shrink: 0;
+}
+
+#pen-float .tog {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.8rem;
+  cursor: pointer;
+  user-select: none;
+}
+
+#pen-float .tog input {
+  margin: 0;
+  accent-color: var(--panel-accent);
+}
