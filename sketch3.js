@@ -11,6 +11,7 @@ const ASE3_LAYOUTS = [
   ["lab-branch", "branchT"],
   ["lab-star", "starT"],
   ["lab-thread", "threadT"],
+  ["lab-klee", "kleeT"],
 ];
 const ASE3_HUD_TOGS = [
   ["gridT", "grid"],
@@ -19,6 +20,7 @@ const ASE3_HUD_TOGS = [
   ["branchT", "branch"],
   ["starT", "stars"],
   ["threadT", "thread"],
+  ["kleeT", "klee"],
 ];
 const ASE3_MORPH_LO = 0.5;
 const ASE3_MORPH_HI = 6;
@@ -35,6 +37,7 @@ let ase3HoldReady = false;
 let ase3HoldPaths = null;
 let ase3Paused = false;
 let ase3PauseAt = 0;
+let ase3StyleByKey = {};
 
 const ase3BaseNewSeed = aseNewSeed;
 const ase3BaseCollect = aseCollectPaths;
@@ -96,7 +99,8 @@ aseBindRange = function (id, valId, key, lo, hi, digits) {
     id === "lab-bar" ||
     id === "lab-branch" ||
     id === "lab-star" ||
-    id === "lab-thread"
+    id === "lab-thread" ||
+    id === "lab-klee"
   ) {
     return;
   }
@@ -180,11 +184,12 @@ function ase3CollectPack(seed) {
   const branches = run(aseCollectBranchPaths);
   const stars = run(aseCollectStarPaths);
   const threads = run(aseCollectThreadPaths);
+  const klees = run(aseCollectKleePaths);
   aseMarkLongLayout(grid);
   aseSeed = hold;
   randomSeed(aseSeed);
   noiseSeed(aseSeed);
-  return { grid, conc, bars, branches, stars, threads };
+  return { grid, conc, bars, branches, stars, threads, klees };
 }
 
 function ase3SyncPacks() {
@@ -200,6 +205,7 @@ function ase3SyncPacks() {
     branches: aseMatchTwo(ase3PackFrom.branches, ase3PackTo.branches),
     stars: aseMatchTwo(ase3PackFrom.stars, ase3PackTo.stars),
     threads: aseMatchTwo(ase3PackFrom.threads, ase3PackTo.threads),
+    klees: aseMatchTwo(ase3PackFrom.klees, ase3PackTo.klees),
   };
 }
 
@@ -209,14 +215,68 @@ function ase3Blend() {
   return u * u * (3 - 2 * u);
 }
 
+function ase3PathKey(p) {
+  if (!p || !p.pts || p.pts.length < 2) return "";
+  const a = p.pts[0];
+  const b = p.pts[p.pts.length - 1];
+  const m = p.pts[p.pts.length >> 1];
+  return [
+    p.pts.length,
+    a.x.toFixed(2),
+    a.y.toFixed(2),
+    m.x.toFixed(2),
+    m.y.toFixed(2),
+    b.x.toFixed(2),
+    b.y.toFixed(2),
+  ].join(":");
+}
+
+function ase3TakeStyleSalt(i, a, b) {
+  const keyA = ase3PathKey(a);
+  const keyB = ase3PathKey(b);
+  let s = null;
+  if (keyA && ase3StyleByKey[keyA] != null) s = ase3StyleByKey[keyA];
+  else if (keyB && ase3StyleByKey[keyB] != null) s = ase3StyleByKey[keyB];
+  else s = i + 1;
+  if (keyA) ase3StyleByKey[keyA] = s;
+  if (keyB) ase3StyleByKey[keyB] = s;
+  return s;
+}
+
+function ase3CarryPath(path, salt) {
+  return {
+    pts: path.pts,
+    closed: !!path.closed,
+    salt,
+    hub: path.hub,
+    accent: !!path.accent,
+    klee: !!path.klee,
+  };
+}
+
 function ase3LerpLayout(fromList, toList, pairs, u) {
-  if (u <= 1e-6) return fromList;
-  if (u >= 1 - 1e-6) return toList;
   const nonlinear = !!ASE_LAB.nonlinear;
   const out = [];
   for (let i = 0; i < pairs.length; i++) {
     const a = pairs[i].a;
     const b = pairs[i].b;
+    const salt = ase3TakeStyleSalt(i, a, b);
+    if (u <= 1e-6 && a) {
+      out.push(ase3CarryPath(a, salt));
+      continue;
+    }
+    if (u >= 1 - 1e-6 && b) {
+      out.push(ase3CarryPath(b, salt));
+      continue;
+    }
+    if (u <= 1e-6 && b) {
+      out.push(ase3CarryPath(b, salt));
+      continue;
+    }
+    if (u >= 1 - 1e-6 && a) {
+      out.push(ase3CarryPath(a, salt));
+      continue;
+    }
     const hubA =
       a && a.hub && Number.isFinite(a.hub.x)
         ? a.hub
@@ -262,9 +322,10 @@ function ase3LerpLayout(fromList, toList, pairs, u) {
     out.push({
       pts,
       closed: !!(a && a.closed) || !!(b && b.closed),
-      salt: (a && a.salt != null ? a.salt : b && b.salt) || i,
+      salt,
       hub,
       accent: !!(a && a.accent) || !!(b && b.accent),
+      klee: !!(a && a.klee) || !!(b && b.klee),
     });
   }
   return out;
@@ -290,6 +351,7 @@ function ase3LerpPack() {
       ase3PackPairs.threads,
       u
     ),
+    klees: ase3LerpLayout(ase3PackFrom.klees, ase3PackTo.klees, ase3PackPairs.klees, u),
   };
 }
 
@@ -303,6 +365,7 @@ aseEnsureMorphCache = function () {
     branches: lerp.branches,
     stars: lerp.stars,
     threads: lerp.threads,
+    klees: lerp.klees,
   };
   pack.bundles = aseMatchBundles(
     pack.grid,
@@ -310,7 +373,8 @@ aseEnsureMorphCache = function () {
     pack.bars,
     pack.branches,
     pack.stars,
-    pack.threads
+    pack.threads,
+    pack.klees
   );
   aseStampBundleSalts(pack.bundles);
   return pack;
@@ -321,6 +385,7 @@ aseNewSeed = function (explicit) {
   ase3SeedA = aseSeed;
   ase3SeedB = aseHashSeed(aseSeed, 91.7) || (aseSeed + 1);
   ase3PackKey = "";
+  ase3StyleByKey = {};
   ase3CycleStart = millis();
   ase3HoldReady = false;
   ase3SyncPacks();
@@ -548,6 +613,7 @@ function setup() {
   ASE_LAB.branchT = 0;
   ASE_LAB.starT = 0;
   ASE_LAB.threadT = 1;
+  ASE_LAB.kleeT = 0;
   ASE_LAB.morphSec = ASE3_MORPH_DEF;
   aseLoadLs();
   ase3SnapToggles();

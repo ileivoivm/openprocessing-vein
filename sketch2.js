@@ -40,6 +40,12 @@ const ASE_THREAD_LEN = 3200; // thread：一條棉線總長
 const ASE_THREAD_STEP = 3.2; // thread：每步長
 const ASE_THREAD_NOISE = 0.32; // thread：轉向雜訊
 //--------------------------------
+const ASE_KLEE_PAD = 14; // klee：短撇基準 margin
+const ASE_KLEE_LONG = 0.52; // klee：長弧佔比
+const ASE_KLEE_STEP = 5; // klee：長弧步長
+const ASE_KLEE_BOX_W = 800; // klee：置中畫框寬
+const ASE_KLEE_BOX_H = 500; // klee：置中畫框高
+//--------------------------------
 const ASE_LAYOUT_N = 40; // 線條數量預設，滑桿 2–70
 const ASE_PENCIL_DENS = 3; // 鉛筆 texZoom，原滑桿下限
 const ASE_PAPER = [246, 236, 214];
@@ -58,6 +64,7 @@ const ASE_LAB = Object.assign({}, MixVein.DEFAULTS, {
   branchT: 0,
   starT: 0,
   threadT: 0,
+  kleeT: 0,
   lineN: ASE_LAYOUT_N,
   white: true,
 });
@@ -138,7 +145,8 @@ function aseApplyPreset(o) {
     o.barT != null ||
     o.branchT != null ||
     o.starT != null ||
-    o.threadT != null
+    o.threadT != null ||
+    o.kleeT != null
   ) {
     if (o.gridT != null) ASE_LAB.gridT = aseClamp(o.gridT, 0, 1, 1);
     if (o.concT != null) ASE_LAB.concT = aseClamp(o.concT, 0, 1, 0);
@@ -146,6 +154,7 @@ function aseApplyPreset(o) {
     if (o.branchT != null) ASE_LAB.branchT = aseClamp(o.branchT, 0, 1, 0);
     if (o.starT != null) ASE_LAB.starT = aseClamp(o.starT, 0, 1, 0);
     if (o.threadT != null) ASE_LAB.threadT = aseClamp(o.threadT, 0, 1, 0);
+    if (o.kleeT != null) ASE_LAB.kleeT = aseClamp(o.kleeT, 0, 1, 0);
   } else if (o.layoutT != null) {
     const t = aseClamp(o.layoutT, 0, 1, 0);
     ASE_LAB.gridT = 1 - t;
@@ -154,6 +163,7 @@ function aseApplyPreset(o) {
     ASE_LAB.branchT = 0;
     ASE_LAB.starT = 0;
     ASE_LAB.threadT = 0;
+    ASE_LAB.kleeT = 0;
   } else if (o.layout === "concentric") {
     ASE_LAB.gridT = 0;
     ASE_LAB.concT = 1;
@@ -161,6 +171,7 @@ function aseApplyPreset(o) {
     ASE_LAB.branchT = 0;
     ASE_LAB.starT = 0;
     ASE_LAB.threadT = 0;
+    ASE_LAB.kleeT = 0;
   } else if (o.layout === "grid") {
     ASE_LAB.gridT = 1;
     ASE_LAB.concT = 0;
@@ -168,6 +179,7 @@ function aseApplyPreset(o) {
     ASE_LAB.branchT = 0;
     ASE_LAB.starT = 0;
     ASE_LAB.threadT = 0;
+    ASE_LAB.kleeT = 0;
   } else if (o.layout === "barcode" || o.layout === "bar") {
     ASE_LAB.gridT = 0;
     ASE_LAB.concT = 0;
@@ -175,6 +187,7 @@ function aseApplyPreset(o) {
     ASE_LAB.branchT = 0;
     ASE_LAB.starT = 0;
     ASE_LAB.threadT = 0;
+    ASE_LAB.kleeT = 0;
   } else if (o.layout === "branch") {
     ASE_LAB.gridT = 0;
     ASE_LAB.concT = 0;
@@ -182,6 +195,7 @@ function aseApplyPreset(o) {
     ASE_LAB.branchT = 1;
     ASE_LAB.starT = 0;
     ASE_LAB.threadT = 0;
+    ASE_LAB.kleeT = 0;
   } else if (o.layout === "star" || o.layout === "stars") {
     ASE_LAB.gridT = 0;
     ASE_LAB.concT = 0;
@@ -189,6 +203,7 @@ function aseApplyPreset(o) {
     ASE_LAB.branchT = 0;
     ASE_LAB.starT = 1;
     ASE_LAB.threadT = 0;
+    ASE_LAB.kleeT = 0;
   } else if (o.layout === "thread" || o.layout === "yarn") {
     ASE_LAB.gridT = 0;
     ASE_LAB.concT = 0;
@@ -196,6 +211,15 @@ function aseApplyPreset(o) {
     ASE_LAB.branchT = 0;
     ASE_LAB.starT = 0;
     ASE_LAB.threadT = 1;
+    ASE_LAB.kleeT = 0;
+  } else if (o.layout === "klee") {
+    ASE_LAB.gridT = 0;
+    ASE_LAB.concT = 0;
+    ASE_LAB.barT = 0;
+    ASE_LAB.branchT = 0;
+    ASE_LAB.starT = 0;
+    ASE_LAB.threadT = 0;
+    ASE_LAB.kleeT = 1;
   }
   return true;
 }
@@ -290,6 +314,7 @@ function asePresetObject() {
     branchT: +Number(ASE_LAB.branchT || 0).toFixed(2),
     starT: +Number(ASE_LAB.starT || 0).toFixed(2),
     threadT: +Number(ASE_LAB.threadT || 0).toFixed(2),
+    kleeT: +Number(ASE_LAB.kleeT || 0).toFixed(2),
     lineN: aseLayoutN(),
     nonlinear: !!ASE_LAB.nonlinear,
     brush: ASE_LAB.brush !== false,
@@ -354,6 +379,8 @@ function aseSyncSliders() {
   setText("lab-star-v", Number(ASE_LAB.starT || 0).toFixed(2));
   set("lab-thread", ASE_LAB.threadT || 0);
   setText("lab-thread-v", Number(ASE_LAB.threadT || 0).toFixed(2));
+  set("lab-klee", ASE_LAB.kleeT || 0);
+  setText("lab-klee-v", Number(ASE_LAB.kleeT || 0).toFixed(2));
   set("lab-line-n", aseLayoutN());
   setText("lab-line-n-v", String(aseLayoutN()));
 }
@@ -1375,6 +1402,506 @@ function aseCollectThreadPaths() {
   return aseSplitOpenPolyline(pts, aseLayoutN(), hub, 440, knots);
 }
 
+function aseQtMake(x, y, w, h) {
+  return { x, y, w, h, items: [], kids: null };
+}
+
+function aseQtOverlap(a, b) {
+  return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+}
+
+function aseQtFits(n, box) {
+  return (
+    box.x >= n.x &&
+    box.y >= n.y &&
+    box.x + box.w <= n.x + n.w &&
+    box.y + box.h <= n.y + n.h
+  );
+}
+
+function aseQtInsert(n, item) {
+  if (n.kids) {
+    for (let i = 0; i < 4; i++) {
+      if (aseQtFits(n.kids[i], item.box)) {
+        aseQtInsert(n.kids[i], item);
+        return;
+      }
+    }
+  }
+  n.items.push(item);
+  if (!n.kids && n.items.length > 6 && n.w > 48 && n.h > 48) {
+    const hw = n.w * 0.5;
+    const hh = n.h * 0.5;
+    n.kids = [
+      aseQtMake(n.x, n.y, hw, hh),
+      aseQtMake(n.x + hw, n.y, hw, hh),
+      aseQtMake(n.x, n.y + hh, hw, hh),
+      aseQtMake(n.x + hw, n.y + hh, hw, hh),
+    ];
+    const keep = n.items;
+    n.items = [];
+    for (let i = 0; i < keep.length; i++) aseQtInsert(n, keep[i]);
+  }
+}
+
+function aseQtQuery(n, box, out) {
+  if (!aseQtOverlap({ x: n.x, y: n.y, w: n.w, h: n.h }, box)) return out;
+  for (let i = 0; i < n.items.length; i++) {
+    if (aseQtOverlap(n.items[i].box, box)) out.push(n.items[i]);
+  }
+  if (n.kids) {
+    for (let i = 0; i < 4; i++) aseQtQuery(n.kids[i], box, out);
+  }
+  return out;
+}
+
+function aseKleeBox(pts, pad) {
+  let x0 = Infinity;
+  let y0 = Infinity;
+  let x1 = -Infinity;
+  let y1 = -Infinity;
+  for (let i = 0; i < pts.length; i++) {
+    x0 = Math.min(x0, pts[i].x);
+    y0 = Math.min(y0, pts[i].y);
+    x1 = Math.max(x1, pts[i].x);
+    y1 = Math.max(y1, pts[i].y);
+  }
+  return { x: x0 - pad, y: y0 - pad, w: x1 - x0 + pad * 2, h: y1 - y0 + pad * 2 };
+}
+
+function asePointSeg(px, py, ax, ay, bx, by) {
+  const dx = bx - ax;
+  const dy = by - ay;
+  const l2 = dx * dx + dy * dy;
+  if (l2 < 1e-8) return Math.hypot(px - ax, py - ay);
+  let t = ((px - ax) * dx + (py - ay) * dy) / l2;
+  t = Math.max(0, Math.min(1, t));
+  return Math.hypot(px - (ax + dx * t), py - (ay + dy * t));
+}
+
+function aseOrient(ax, ay, bx, by, cx, cy) {
+  return (by - ay) * (cx - bx) - (bx - ax) * (cy - by);
+}
+
+function aseSegHit(a, b, c, d) {
+  const o1 = aseOrient(a.x, a.y, b.x, b.y, c.x, c.y);
+  const o2 = aseOrient(a.x, a.y, b.x, b.y, d.x, d.y);
+  const o3 = aseOrient(c.x, c.y, d.x, d.y, a.x, a.y);
+  const o4 = aseOrient(c.x, c.y, d.x, d.y, b.x, b.y);
+  return o1 * o2 < 0 && o3 * o4 < 0;
+}
+
+function aseKleeCross(ptsA, ptsB, minDist) {
+  for (let i = 0; i < ptsA.length - 1; i++) {
+    for (let j = 0; j < ptsB.length - 1; j++) {
+      const a = ptsA[i];
+      const b = ptsA[i + 1];
+      const c = ptsB[j];
+      const d = ptsB[j + 1];
+      if (aseSegHit(a, b, c, d)) return true;
+      if (asePointSeg(a.x, a.y, c.x, c.y, d.x, d.y) < minDist) return true;
+      if (asePointSeg(b.x, b.y, c.x, c.y, d.x, d.y) < minDist) return true;
+      if (asePointSeg(c.x, c.y, a.x, a.y, b.x, b.y) < minDist) return true;
+      if (asePointSeg(d.x, d.y, a.x, a.y, b.x, b.y) < minDist) return true;
+    }
+  }
+  return false;
+}
+
+function aseKleeSign(pts) {
+  const a = pts[0];
+  const b = pts[pts.length - 1];
+  const len = asePathLen(pts, false);
+  const ang = Math.atan2(b.y - a.y, b.x - a.x);
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  let curve = 0;
+  for (let i = 1; i < pts.length - 1; i++) {
+    const t = i / (pts.length - 1);
+    curve = Math.max(
+      curve,
+      Math.hypot(pts[i].x - (a.x + dx * t), pts[i].y - (a.y + dy * t))
+    );
+  }
+  return [
+    Math.round(len / 22),
+    Math.round(((ang + Math.PI) / (Math.PI * 2)) * 10),
+    Math.round(curve / 10),
+  ].join("|");
+}
+
+function aseKleeBounds() {
+  const w = ASE_KLEE_BOX_W;
+  const h = ASE_KLEE_BOX_H;
+  return { x: (ASE_W - w) * 0.5, y: (ASE_H - h) * 0.5, w, h };
+}
+
+function aseKleeInBox(pts, b, inset) {
+  const x0 = b.x + inset;
+  const y0 = b.y + inset;
+  const x1 = b.x + b.w - inset;
+  const y1 = b.y + b.h - inset;
+  for (let i = 0; i < pts.length; i++) {
+    if (pts[i].x < x0 || pts[i].x > x1 || pts[i].y < y0 || pts[i].y > y1) return false;
+  }
+  return true;
+}
+
+function aseKleeDir(pts) {
+  const a = pts[0];
+  const b = pts[pts.length - 1];
+  return Math.atan2(b.y - a.y, b.x - a.x);
+}
+
+function aseKleeParallel(a, b) {
+  let d = Math.abs(aseAngWrap(aseKleeDir(a) - aseKleeDir(b)));
+  if (d > Math.PI * 0.5) d = Math.PI - d;
+  return d < 0.32;
+}
+
+function aseKleeFamilyDir(u, v) {
+  if (v > 0.76) return random(-0.16, 0.16);
+  if (v < 0.22) return -Math.PI * 0.5 + random(-0.22, 0.22);
+  if (u < 0.28) return -0.58 + random(-0.18, 0.18);
+  if (u > 0.72) return 0.58 + random(-0.18, 0.18);
+  return (Math.floor(u * 4 + v * 3) % 2 ? 0.38 : -0.95) + random(-0.14, 0.14);
+}
+
+function aseKleeClosest(px, py, ax, ay, bx, by) {
+  const dx = bx - ax;
+  const dy = by - ay;
+  const l2 = dx * dx + dy * dy;
+  let t = 0;
+  if (l2 > 1e-8) t = ((px - ax) * dx + (py - ay) * dy) / l2;
+  t = Math.max(0, Math.min(1, t));
+  const x = ax + dx * t;
+  const y = ay + dy * t;
+  return { x, y, d: Math.hypot(px - x, py - y) };
+}
+
+function aseKleeAhead(px, py, dir, items, warn) {
+  if (!items || !items.length) return null;
+  const hx = Math.cos(dir);
+  const hy = Math.sin(dir);
+  let best = null;
+  for (let i = 0; i < items.length; i++) {
+    const pts = items[i].pts;
+    if (!pts || pts.length < 2) continue;
+    for (let j = 0; j < pts.length - 1; j++) {
+      const a = pts[j];
+      const c = pts[j + 1];
+      const hit = aseKleeClosest(px, py, a.x, a.y, c.x, c.y);
+      if (hit.d > warn) continue;
+      const ahead = (hit.x - px) * hx + (hit.y - py) * hy;
+      if (ahead < -6) continue;
+      const score = hit.d - ahead * 0.18;
+      if (!best || score < best.score) {
+        best = { d: hit.d, x: hit.x, y: hit.y, score };
+      }
+    }
+  }
+  return best;
+}
+
+function aseKleeWalk(x0, y0, dir0, len, bendFn, ctx) {
+  const step = Math.max(2.5, ASE_KLEE_STEP);
+  const n = Math.max(4, Math.round(len / step));
+  const pts = [{ x: x0, y: y0 }];
+  let x = x0;
+  let y = y0;
+  const b = ctx && ctx.b;
+  const inset = (ctx && ctx.inset) || 20;
+  const warn = (ctx && ctx.warn) || 20;
+  const xMin = b ? b.x + inset : 0;
+  const yMin = b ? b.y + inset : 0;
+  const xMax = b ? b.x + b.w - inset : ASE_W;
+  const yMax = b ? b.y + b.h - inset : ASE_H;
+  for (let i = 1; i <= n; i++) {
+    const u = i / n;
+    let d = dir0 + (bendFn ? bendFn(u) : 0) + (noise(x * 0.02, y * 0.02, dir0) - 0.5) * 0.16;
+    if (x < xMin + 20) d += aseAngWrap(0 - d) * 0.5;
+    if (x > xMax - 20) d += aseAngWrap(Math.PI - d) * 0.5;
+    if (y < yMin + 20) d += aseAngWrap(Math.PI * 0.5 - d) * 0.5;
+    if (y > yMax - 20) d += aseAngWrap(-Math.PI * 0.5 - d) * 0.5;
+    if (ctx && ctx.qt && ctx.steer !== false) {
+      const pad = warn + 16;
+      const near = aseQtQuery(ctx.qt, { x: x - pad, y: y - pad, w: pad * 2, h: pad * 2 }, []);
+      const hit = aseKleeAhead(x, y, d, near, warn);
+      if (hit) {
+        const away = Math.atan2(y - hit.y, x - hit.x);
+        const t = Math.max(0, 1 - hit.d / warn);
+        d += aseAngWrap(away - d) * (0.42 + 0.58 * t);
+      }
+    }
+    const nx = x + step * Math.cos(d);
+    const ny = y + step * Math.sin(d);
+    if (nx < xMin || nx > xMax || ny < yMin || ny > yMax) break;
+    x = nx;
+    y = ny;
+    pts.push({ x, y });
+  }
+  return pts;
+}
+
+function aseKleeSimplify(pts) {
+  if (!pts || pts.length < 2) return pts || [];
+  const out = [{ x: pts[0].x, y: pts[0].y }];
+  for (let i = 1; i < pts.length; i++) {
+    const p = pts[i];
+    const last = out[out.length - 1];
+    if (Math.hypot(p.x - last.x, p.y - last.y) < 1.25) continue;
+    out.push({ x: p.x, y: p.y });
+  }
+  return out;
+}
+
+function aseKleeCurve(x0, y0, dir, len, bendFn, ctx) {
+  return aseKleeWalk(x0, y0, dir, len, bendFn, ctx);
+}
+
+function aseKleeTick(x0, y0, dir, len, ctx) {
+  return aseKleeWalk(x0, y0, dir, Math.max(12, len), null, ctx);
+}
+
+function aseKleePetalArc(cx, cy, a0, sweep, rMin, rMax) {
+  const r = Math.max(rMin, rMax);
+  const n = Math.max(10, Math.round(Math.abs(sweep) * r / Math.max(2.5, ASE_KLEE_STEP)));
+  const pts = [];
+  for (let i = 0; i <= n; i++) {
+    const u = i / n;
+    const a = a0 + sweep * u;
+    const rr = rMin + (rMax - rMin) * Math.sin(u * Math.PI);
+    const wob = (noise(Math.cos(a) * 3.1, Math.sin(a) * 3.1, cx * 0.01) - 0.5) * 7;
+    pts.push({
+      x: cx + Math.cos(a) * (rr + wob),
+      y: cy + Math.sin(a) * (rr + wob),
+    });
+  }
+  return pts;
+}
+
+function aseKleeNearTangent(x, y, plants, maxD) {
+  let best = null;
+  for (let p = 0; p < plants.length; p++) {
+    const pts = plants[p].pts;
+    if (!pts || pts.length < 2) continue;
+    for (let i = 0; i < pts.length - 1; i++) {
+      const a = pts[i];
+      const c = pts[i + 1];
+      const hit = aseKleeClosest(x, y, a.x, a.y, c.x, c.y);
+      if (hit.d > maxD) continue;
+      if (best && hit.d >= best.d) continue;
+      best = {
+        d: hit.d,
+        ang: Math.atan2(c.y - a.y, c.x - a.x),
+      };
+    }
+  }
+  return best;
+}
+
+function aseKleeBend(kind, side) {
+  if (kind === 0) return (u) => side * Math.sin(u * Math.PI) * (1.25 + random(0.55));
+  if (kind === 1) return (u) => side * Math.sin(u * Math.PI * 2) * (0.55 + random(0.4));
+  if (kind === 2) return (u) => side * (u < 0.5 ? u * 3.0 : (1 - u) * 2.5);
+  return (u) => side * Math.sin(u * Math.PI) * (0.32 + random(0.28));
+}
+
+/** 克力：800×500 框內排 C／S／U 長弧＋中段＋短撇；重曲線、節奏 margin、分區排版。 */
+function aseCollectKleePaths() {
+  const need = aseLayoutN();
+  const b = aseKleeBounds();
+  const inset = 18;
+  const longN = Math.max(10, Math.min(32, Math.round(need * ASE_KLEE_LONG)));
+  const rest = Math.max(0, need - longN);
+  const midN = Math.max(4, Math.round(rest * 0.55));
+  const shortN = Math.max(0, need - longN - midN);
+  const paths = [];
+  const longs = [];
+  const qt = aseQtMake(b.x, b.y, b.w, b.h);
+  const padLong = 14;
+  const padHug = 9;
+  const padShort = 7.5;
+  const padPara = 12;
+  const ctxArc = { qt, b, inset, warn: 0, steer: false };
+  const ctxMark = { qt, b, inset, warn: 10, steer: true };
+
+  const gapFor = (pts, isLong, other) => {
+    if (isLong && other.long) return padLong;
+    if (isLong || other.long) return padHug;
+    return aseKleeParallel(pts, other.pts) ? padPara : padShort;
+  };
+
+  const accept = (pts, isLong) => {
+    pts = aseKleeSimplify(pts);
+    if (!pts || pts.length < 2 || !aseKleeInBox(pts, b, inset * 0.45)) return false;
+    const pad = isLong ? padLong : padShort;
+    const box = aseKleeBox(pts, pad);
+    const near = aseQtQuery(qt, box, []);
+    for (let i = 0; i < near.length; i++) {
+      if (aseKleeCross(pts, near[i].pts, gapFor(pts, isLong, near[i]))) return false;
+    }
+    const hub = pts[pts.length >> 1];
+    const path = {
+      pts,
+      closed: false,
+      klee: true,
+      salt: 520 + paths.length * 2.11,
+      hub: { x: hub.x, y: hub.y },
+    };
+    paths.push(path);
+    if (isLong) longs.push(path);
+    aseQtInsert(qt, { box, pts, long: !!isLong });
+    return true;
+  };
+
+  const tryPut = (isLong, make) => {
+    for (let k = 0; k < 16; k++) {
+      if (accept(make(), isLong)) return true;
+    }
+    return false;
+  };
+
+  const colsL = 3;
+  const rowsL = 2;
+  const cwL = b.w / colsL;
+  const chL = b.h / rowsL;
+  const regionLoad = new Array(colsL * rowsL).fill(0);
+  const pickRegion = () => {
+    let best = 0;
+    let bestN = Infinity;
+    for (let i = 0; i < regionLoad.length; i++) {
+      if (regionLoad[i] < bestN) {
+        bestN = regionLoad[i];
+        best = i;
+      }
+    }
+    return best;
+  };
+
+  for (let n = 0; n < longN; n++) {
+    const ri = pickRegion();
+    const col = ri % colsL;
+    const row = Math.floor(ri / colsL);
+    const placed = tryPut(true, () => {
+      const kind = n % 4;
+      const u0 = (col + random(0.18, 0.82)) / colsL;
+      const v0 = (row + random(0.18, 0.82)) / rowsL;
+      const x = b.x + u0 * b.w;
+      const y = b.y + v0 * b.h;
+      const dir = aseKleeFamilyDir(u0, v0) + random(-0.35, 0.35);
+      const side = random() < 0.5 ? -1 : 1;
+      if (kind === 0 && random() < 0.45) {
+        return aseKleePetalArc(
+          x,
+          y,
+          dir - 0.4 + random(-0.2, 0.2),
+          (0.85 + random(1.0)) * side,
+          32 + random(16),
+          72 + random(48)
+        );
+      }
+      return aseKleeCurve(
+        x,
+        y,
+        dir,
+        kind === 2 ? random(150, 230) : random(110, 200),
+        aseKleeBend(kind, side),
+        ctxArc
+      );
+    });
+    if (placed) regionLoad[ri]++;
+  }
+
+  const markDir = (x, y) => {
+    const tan = aseKleeNearTangent(x, y, longs, 56);
+    if (tan && tan.d < 36) return tan.ang + random(-0.14, 0.14);
+    return aseKleeFamilyDir((x - b.x) / b.w, (y - b.y) / b.h);
+  };
+
+  let midGot = 0;
+  const midCap = midN + Math.max(0, longN - longs.length);
+  for (let t = 0; t < need * 90 && midGot < midCap && paths.length < need; t++) {
+    const x = random(b.x + inset, b.x + b.w - inset);
+    const y = random(b.y + inset, b.y + b.h - inset);
+    const side = random() < 0.5 ? -1 : 1;
+    if (
+      accept(
+        aseKleeCurve(
+          x,
+          y,
+          markDir(x, y),
+          random(58, 130),
+          (u) => side * Math.sin(u * Math.PI) * (0.18 + random(0.32)),
+          ctxMark
+        ),
+        false
+      )
+    ) {
+      midGot++;
+    }
+  }
+
+  let shortGot = 0;
+  const cols = 10;
+  const rows = 5;
+  const cw = b.w / cols;
+  const ch = b.h / rows;
+  for (let row = 0; row < rows && shortGot < shortN && paths.length < need; row++) {
+    for (let col = 0; col < cols && shortGot < shortN && paths.length < need; col++) {
+      const cell = { x: b.x + col * cw, y: b.y + row * ch, w: cw, h: ch };
+      if (aseQtQuery(qt, cell, []).length >= 6) continue;
+      const px = cell.x + cw * random(0.18, 0.82);
+      const py = cell.y + ch * random(0.18, 0.82);
+      if (accept(aseKleeTick(px, py, markDir(px, py), random(14, 40), ctxMark), false)) {
+        shortGot++;
+      }
+    }
+  }
+
+  for (let pass = 0; pass < 3 && shortGot < shortN && paths.length < need; pass++) {
+    const lo = pass < 1 ? 16 : 12;
+    const hi = pass < 1 ? 42 : 28;
+    for (let t = 0; t < need * 40 && shortGot < shortN && paths.length < need; t++) {
+      const x = random(b.x + inset, b.x + b.w - inset);
+      const y = random(b.y + inset, b.y + b.h - inset);
+      if (accept(aseKleeTick(x, y, markDir(x, y), random(lo, hi), ctxMark), false)) {
+        shortGot++;
+      }
+    }
+  }
+
+  for (let t = 0; t < need * 80 && paths.length < need; t++) {
+    const ri = pickRegion();
+    const col = ri % colsL;
+    const row = Math.floor(ri / colsL);
+    const kind = paths.length % 4;
+    const u0 = (col + random(0.18, 0.82)) / colsL;
+    const v0 = (row + random(0.18, 0.82)) / rowsL;
+    const x = b.x + u0 * b.w;
+    const y = b.y + v0 * b.h;
+    const dir = aseKleeFamilyDir(u0, v0) + random(-0.35, 0.35);
+    const side = random() < 0.5 ? -1 : 1;
+    if (
+      accept(
+        aseKleeCurve(
+          x,
+          y,
+          dir,
+          kind === 2 ? random(150, 230) : random(110, 200),
+          aseKleeBend(kind, side),
+          ctxArc
+        ),
+        true
+      )
+    ) {
+      regionLoad[ri]++;
+    }
+  }
+
+  return aseCapPaths(paths, need);
+}
+
 const ASE_MORPH_N = 48;
 
 function asePathCentroid(pts) {
@@ -1514,11 +2041,12 @@ function aseBlankBundle() {
     branch: null,
     star: null,
     thread: null,
+    klee: null,
   };
 }
 
 function aseBundleAnchor(b) {
-  return b.grid || b.conc || b.bar || b.branch || b.star || b.thread;
+  return b.grid || b.conc || b.bar || b.branch || b.star || b.thread || b.klee;
 }
 
 function aseAttachSide(bundles, key, paths) {
@@ -1559,8 +2087,8 @@ function aseAttachSide(bundles, key, paths) {
   return out;
 }
 
-/** 六套造型同一條身份，長線對長線。 */
-function aseMatchBundles(grid, conc, bars, branches, stars, threads) {
+/** 七套造型同一條身份，長線對長線。 */
+function aseMatchBundles(grid, conc, bars, branches, stars, threads, klees) {
   let bundles = aseMatchTwo(grid, conc).map((p) => ({
     grid: p.a,
     conc: p.b,
@@ -1568,11 +2096,13 @@ function aseMatchBundles(grid, conc, bars, branches, stars, threads) {
     branch: null,
     star: null,
     thread: null,
+    klee: null,
   }));
   bundles = aseAttachSide(bundles, "bar", bars);
   bundles = aseAttachSide(bundles, "branch", branches);
   bundles = aseAttachSide(bundles, "star", stars);
   bundles = aseAttachSide(bundles, "thread", threads);
+  bundles = aseAttachSide(bundles, "klee", klees);
   return bundles;
 }
 
@@ -1678,9 +2208,10 @@ function aseMorphWeights() {
   let wR = aseMorphMap("branchT");
   let wS = aseMorphMap("starT");
   let wT = aseMorphMap("threadT");
-  let sum = wG + wC + wB + wR + wS + wT;
+  let wK = aseMorphMap("kleeT");
+  let sum = wG + wC + wB + wR + wS + wT + wK;
   if (sum <= 1e-6)
-    return { wG: 0, wC: 0, wB: 0, wR: 0, wS: 0, wT: 0, wRest: 1, sum: 0 };
+    return { wG: 0, wC: 0, wB: 0, wR: 0, wS: 0, wT: 0, wK: 0, wRest: 1, sum: 0 };
   if (sum > 1) {
     wG /= sum;
     wC /= sum;
@@ -1688,9 +2219,10 @@ function aseMorphWeights() {
     wR /= sum;
     wS /= sum;
     wT /= sum;
+    wK /= sum;
     sum = 1;
   }
-  return { wG, wC, wB, wR, wS, wT, wRest: 1 - sum, sum };
+  return { wG, wC, wB, wR, wS, wT, wK, wRest: 1 - sum, sum };
 }
 
 function aseMorphBundles(bundles, pack, weights) {
@@ -1702,6 +2234,7 @@ function aseMorphBundles(bundles, pack, weights) {
   const branchHub0 = asePackHub(pack.branches);
   const starHub0 = asePackHub(pack.stars);
   const threadHub0 = asePackHub(pack.threads);
+  const kleeHub0 = asePackHub(pack.klees);
   const out = [];
   for (let i = 0; i < list.length; i++) {
     const g = list[i].grid;
@@ -1710,25 +2243,41 @@ function aseMorphBundles(bundles, pack, weights) {
     const r = list[i].branch;
     const s = list[i].star;
     const th = list[i].thread;
+    const kl = list[i].klee;
     const gHub = asePathHub(g, gridHub0);
     const cHub = asePathHub(c, concHub0);
     const bHub = asePathHub(b, barHub0);
     const rHub = asePathHub(r, branchHub0);
     const sHub = asePathHub(s, starHub0);
     const tHub = asePathHub(th, threadHub0);
+    const kHub = asePathHub(kl, kleeHub0);
     let pg = aseSampleSide(g, g && g.closed, gHub);
     let pc = aseSampleSide(c, c && c.closed, cHub);
     let pb = aseSampleSide(b, b && b.closed, bHub);
     let pr = aseSampleSide(r, r && r.closed, rHub);
     let ps = aseSampleSide(s, s && s.closed, sHub);
     let pt = aseSampleSide(th, th && th.closed, tHub);
-    if (!pg || !pc || !pb || !pr || !ps || !pt) continue;
-    const ref = g ? pg[0] : c ? pc[0] : b ? pb[0] : r ? pr[0] : s ? ps[0] : pt[0];
+    let pk = aseSampleSide(kl, kl && kl.closed, kHub);
+    if (!pg || !pc || !pb || !pr || !ps || !pt || !pk) continue;
+    const ref = g
+      ? pg[0]
+      : c
+        ? pc[0]
+        : b
+          ? pb[0]
+          : r
+            ? pr[0]
+            : s
+              ? ps[0]
+              : th
+                ? pt[0]
+                : pk[0];
     if (c) pc = aseAlignPts(pc, !!c.closed, ref);
     if (b) pb = aseAlignPts(pb, !!b.closed, ref);
     if (r) pr = aseAlignPts(pr, !!r.closed, ref);
     if (s) ps = aseAlignPts(ps, !!s.closed, ref);
     if (th) pt = aseAlignPts(pt, !!th.closed, ref);
+    if (kl) pk = aseAlignPts(pk, !!kl.closed, ref);
     const live = [
       { pts: pg, w: weights.wG, hub: gHub },
       { pts: pc, w: weights.wC, hub: cHub },
@@ -1736,6 +2285,7 @@ function aseMorphBundles(bundles, pack, weights) {
       { pts: pr, w: weights.wR, hub: rHub },
       { pts: ps, w: weights.wS, hub: sHub },
       { pts: pt, w: weights.wT, hub: tHub },
+      { pts: pk, w: weights.wK, hub: kHub },
     ];
     let hx = 0;
     let hy = 0;
@@ -1758,6 +2308,7 @@ function aseMorphBundles(bundles, pack, weights) {
         weights.wR * weights.wR +
         weights.wS * weights.wS +
         weights.wT * weights.wT +
+        weights.wK * weights.wK +
         weights.wRest * weights.wRest);
     const pulse = Math.sin(Math.max(0, energy) * Math.PI);
     const salt =
@@ -1772,7 +2323,9 @@ function aseMorphBundles(bundles, pack, weights) {
                 ? r.salt
                 : s && s.salt != null
                   ? s.salt
-                  : th && th.salt
+                  : th && th.salt != null
+                    ? th.salt
+                    : kl && kl.salt
       ) || i;
     const pts = [];
     for (let k = 0; k < ASE_MORPH_N; k++) {
@@ -1836,14 +2389,17 @@ function aseMorphBundles(bundles, pack, weights) {
                 ? r.salt
                 : s && s.salt != null
                   ? s.salt
-                  : th && th.salt,
+                  : th && th.salt != null
+                    ? th.salt
+                    : kl && kl.salt,
       accent:
         !!(g && g.accent) ||
         !!(c && c.accent) ||
         !!(b && b.accent) ||
         !!(r && r.accent) ||
         !!(s && s.accent) ||
-        !!(th && th.accent),
+        !!(th && th.accent) ||
+        !!(kl && kl.accent),
     });
   }
   return out;
@@ -1882,6 +2438,11 @@ function aseMorphCacheKey() {
     ASE_THREAD_LEN,
     ASE_THREAD_STEP,
     ASE_THREAD_NOISE,
+    ASE_KLEE_PAD,
+    ASE_KLEE_LONG,
+    ASE_KLEE_STEP,
+    ASE_KLEE_BOX_W,
+    ASE_KLEE_BOX_H,
     aseLayoutN(),
   ].join("|");
 }
@@ -1904,6 +2465,7 @@ function aseStampBundleSalts(bundles) {
     const r = bundles[i].branch;
     const s = bundles[i].star;
     const th = bundles[i].thread;
+    const kl = bundles[i].klee;
     const salt =
       g && g.salt != null
         ? g.salt
@@ -1917,7 +2479,9 @@ function aseStampBundleSalts(bundles) {
                 ? s.salt
                 : th && th.salt != null
                   ? th.salt
-                  : i * 1.37;
+                  : kl && kl.salt != null
+                    ? kl.salt
+                    : i * 1.37;
     const accent = !!(g && g.accent);
     if (g) g.salt = salt;
     if (c) {
@@ -1940,6 +2504,7 @@ function aseStampBundleSalts(bundles) {
       th.salt = salt;
       th.accent = accent;
     }
+    if (kl) kl.salt = salt;
   }
 }
 
@@ -1964,10 +2529,13 @@ function aseEnsureMorphCache() {
   randomSeed(aseSeed);
   noiseSeed(aseSeed);
   const threads = aseCollectThreadPaths();
+  randomSeed(aseSeed);
+  noiseSeed(aseSeed);
+  const klees = aseCollectKleePaths();
   aseMarkLongLayout(grid);
-  const bundles = aseMatchBundles(grid, conc, bars, branches, stars, threads);
+  const bundles = aseMatchBundles(grid, conc, bars, branches, stars, threads, klees);
   aseStampBundleSalts(bundles);
-  aseMorphCache = { key, grid, conc, bars, branches, stars, threads, bundles };
+  aseMorphCache = { key, grid, conc, bars, branches, stars, threads, klees, bundles };
   return aseMorphCache;
 }
 
@@ -1975,7 +2543,7 @@ function aseLayoutWeight(key) {
   return aseClamp(ASE_LAB[key], 0, 1, 0);
 }
 
-/** 同一條線在六套造型間插值；只開一端則用該端原路徑。 */
+/** 同一條線在七套造型間插值；只開一端則用該端原路徑。 */
 function aseCollectPaths() {
   const pack = aseEnsureMorphCache();
   const wG = aseLayoutWeight("gridT");
@@ -1984,13 +2552,15 @@ function aseCollectPaths() {
   const wR = aseLayoutWeight("branchT");
   const wS = aseLayoutWeight("starT");
   const wT = aseLayoutWeight("threadT");
+  const wK = aseLayoutWeight("kleeT");
   const live =
     (wG > 1e-6 ? 1 : 0) +
     (wC > 1e-6 ? 1 : 0) +
     (wB > 1e-6 ? 1 : 0) +
     (wR > 1e-6 ? 1 : 0) +
     (wS > 1e-6 ? 1 : 0) +
-    (wT > 1e-6 ? 1 : 0);
+    (wT > 1e-6 ? 1 : 0) +
+    (wK > 1e-6 ? 1 : 0);
   if (live === 0) return [];
   if (live === 1 && wG >= 1) return pack.grid;
   if (live === 1 && wC >= 1) return pack.conc;
@@ -1998,6 +2568,7 @@ function aseCollectPaths() {
   if (live === 1 && wR >= 1) return pack.branches;
   if (live === 1 && wS >= 1) return pack.stars;
   if (live === 1 && wT >= 1) return pack.threads;
+  if (live === 1 && wK >= 1) return pack.klees;
   return aseMorphBundles(pack.bundles, pack, aseMorphWeights());
 }
 
@@ -2020,6 +2591,9 @@ function aseLayoutCaption() {
   }
   if (aseLayoutWeight("threadT") > 0) {
     bits.push("thread " + aseLayoutWeight("threadT").toFixed(2));
+  }
+  if (aseLayoutWeight("kleeT") > 0) {
+    bits.push("klee " + aseLayoutWeight("kleeT").toFixed(2));
   }
   if (!bits.length) return "none";
   return bits.length > 1 ? "morph " + bits.join(" · ") : bits[0];
@@ -2191,6 +2765,7 @@ const ASE_HUD_SLIDES = [
   ["branchT", "branch"],
   ["starT", "stars"],
   ["threadT", "thread"],
+  ["kleeT", "klee"],
 ];
 
 function aseHudGeom() {
@@ -2201,7 +2776,7 @@ function aseHudGeom() {
   const colW = labelW + labelGap + trackW;
   const pad = (ASE_W - (colW * 2 + colGap)) * 0.5;
   const rowH = 42;
-  const y0 = ASE_H - 48 - 4 * rowH;
+  const y0 = ASE_H - 48 - 5 * rowH;
   const cols = [pad, pad + colW + colGap];
   const countTrackX = cols[0] + labelW + labelGap;
   const count = {
@@ -2224,8 +2799,8 @@ function aseHudGeom() {
   const morphY0 = y0 + rowH;
   const rows = [];
   for (let i = 0; i < ASE_HUD_SLIDES.length; i++) {
-    const col = i < 3 ? 0 : 1;
-    const row = i < 3 ? i : i - 3;
+    const col = i < 4 ? 0 : 1;
+    const row = i < 4 ? i : i - 4;
     const x = cols[col];
     const y = morphY0 + row * rowH;
     const trackX = x + labelW + labelGap;
@@ -2549,6 +3124,13 @@ function asePaint() {
       randomSeed(veinSeed);
       noiseSeed(veinSeed);
       const opts = Object.assign(asePathOpts(salt), { showPath: false });
+      if (paths[i].klee) {
+        const L = asePathLen(paths[i].pts, !!paths[i].closed);
+        if (L < 58) {
+          opts.leafShare = 0;
+          opts.leafOff = 0;
+        }
+      }
     const bits = MixVein.collect(
         { pts: paths[i].pts, closed: !!paths[i].closed },
       opts
@@ -2671,6 +3253,7 @@ function wireAseFloatUi() {
   aseBindRange("lab-branch", "lab-branch-v", "branchT", 0, 1, 2);
   aseBindRange("lab-star", "lab-star-v", "starT", 0, 1, 2);
   aseBindRange("lab-thread", "lab-thread-v", "threadT", 0, 1, 2);
+  aseBindRange("lab-klee", "lab-klee-v", "kleeT", 0, 1, 2);
 
   const pathEl = document.getElementById("lab-path");
   if (pathEl) {
