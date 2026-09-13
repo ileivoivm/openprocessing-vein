@@ -36,19 +36,31 @@ const ASE_STAR_LEN = 120; // stars：放射線基準長
 const ASE_STAR_STEP = 4; // stars：每步長
 const ASE_STAR_NOISE = 0.025; // stars：Perlin 座標縮放
 //--------------------------------
-const ASE_THREAD_LEN = 3200; // thread：一條棉線總長
-const ASE_THREAD_STEP = 3.2; // thread：每步長
-const ASE_THREAD_NOISE = 0.32; // thread：轉向雜訊
+const ASE_THREAD_LEN = 2200; // thread：一條棉線總長
+const ASE_THREAD_STEP = 3.0; // thread：每步長
+const ASE_THREAD_NOISE = 0.3; // thread：轉向雜訊
 //--------------------------------
 const ASE_KLEE_PAD = 14; // klee：短撇基準 margin
 const ASE_KLEE_LONG = 0.52; // klee：長弧佔比
 const ASE_KLEE_STEP = 5; // klee：長弧步長
-const ASE_KLEE_BOX_W = 800; // klee：置中畫框寬
+const ASE_KLEE_BOX_W = 500; // klee：置中畫框寬
 const ASE_KLEE_BOX_H = 500; // klee：置中畫框高
 //--------------------------------
 const ASE_LAYOUT_N = 40; // 線條數量預設，滑桿 2–70
 const ASE_PENCIL_DENS = 3; // 鉛筆 texZoom，原滑桿下限
 const ASE_PAPER = [246, 236, 214];
+const ASE_INK_PALETTE = [
+  [0, 0, 0],
+  [255, 255, 255],
+  [0xf9, 0xb8, 0x29],
+  [0xe5, 0x2d, 0x10],
+  [0x9e, 0xb3, 0xbf],
+  [0x70, 0xbc, 0x28],
+  [0x1e, 0x70, 0x58],
+  [0xef, 0xd0, 0x78],
+  [0xf4, 0xca, 0xb2],
+  [0x31, 0x97, 0xcd],
+];
 const ASE_PD = 2;
 const ASE_LS_KEY = "vein-asemic-op-v1";
 
@@ -67,6 +79,7 @@ const ASE_LAB = Object.assign({}, MixVein.DEFAULTS, {
   kleeT: 0,
   lineN: ASE_LAYOUT_N,
   white: true,
+  randColor: false,
 });
 
 let aseSeed = 1;
@@ -136,6 +149,7 @@ function aseApplyPreset(o) {
   if (typeof o.pencil === "boolean") ASE_LAB.pencil = o.pencil;
   if (typeof o.live === "boolean") ASE_LAB.live = o.live;
   if (typeof o.white === "boolean") ASE_LAB.white = o.white;
+  if (typeof o.randColor === "boolean") ASE_LAB.randColor = o.randColor;
   if (typeof o.nonlinear === "boolean") ASE_LAB.nonlinear = o.nonlinear;
   if (typeof o.brush === "boolean") ASE_LAB.brush = o.brush;
   if (o.lineN != null) ASE_LAB.lineN = Math.round(aseClamp(o.lineN, 2, 70, ASE_LAYOUT_N));
@@ -367,6 +381,8 @@ function aseSyncSliders() {
   if (liveEl) liveEl.checked = ASE_LAB.live !== false;
   const whiteEl = document.getElementById("lab-white");
   if (whiteEl) whiteEl.checked = ASE_LAB.white !== false;
+  const randColorEl = document.getElementById("lab-rand-color");
+  if (randColorEl) randColorEl.checked = !!ASE_LAB.randColor;
   set("lab-grid", ASE_LAB.gridT || 0);
   setText("lab-grid-v", Number(ASE_LAB.gridT || 0).toFixed(2));
   set("lab-conc", ASE_LAB.concT || 0);
@@ -464,6 +480,7 @@ function aseSaveLs() {
           pencil: !!ASE_LAB.pencil,
           live: ASE_LAB.live !== false,
           white: ASE_LAB.white !== false,
+          randColor: !!ASE_LAB.randColor,
           nonlinear: !!ASE_LAB.nonlinear,
           brush: ASE_LAB.brush !== false,
         })
@@ -2653,7 +2670,23 @@ function aseMarkAccent(strokes) {
   }
 }
 
+function asePickInkPalette(u) {
+  const n = ASE_INK_PALETTE.length;
+  if (n < 2) return ASE_INK_PALETTE[0];
+  const t = ((Number(u) || 0) % 1 + 1) % 1;
+  if (t < 0.4) return ASE_INK_PALETTE[0];
+  const rest = n - 1;
+  const i = 1 + Math.min(rest - 1, Math.floor(((t - 0.4) / 0.6) * rest));
+  return ASE_INK_PALETTE[i];
+}
+
 function aseInkColor(stroke) {
+  if (ASE_LAB.randColor) {
+    const salt = Number(stroke && stroke.pathSalt);
+    const id = Number.isFinite(salt) ? salt : Number(stroke && stroke.sw) || 0;
+    const c = asePickInkPalette(aseRng(aseHashSeed(aseSeed, id + 11.3))());
+    return color(c[0], c[1], c[2]);
+  }
   if (stroke && stroke.accent && ASE_LAB.white !== false) return color(255);
   if (ASE_LAB.pencil) {
     const salt = Number(stroke && stroke.pathSalt);
@@ -3311,6 +3344,16 @@ function wireAseFloatUi() {
     whiteEl.checked = ASE_LAB.white !== false;
     whiteEl.addEventListener("change", () => {
       ASE_LAB.white = !!whiteEl.checked;
+      aseSaveLs();
+      redraw();
+    });
+  }
+
+  const randColorEl = document.getElementById("lab-rand-color");
+  if (randColorEl) {
+    randColorEl.checked = !!ASE_LAB.randColor;
+    randColorEl.addEventListener("change", () => {
+      ASE_LAB.randColor = !!randColorEl.checked;
       aseSaveLs();
       redraw();
     });

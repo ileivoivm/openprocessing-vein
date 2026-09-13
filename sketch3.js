@@ -56,6 +56,7 @@ function aseSaveLs() {
           pencil: !!ASE_LAB.pencil,
           live: ASE_LAB.live !== false,
           white: ASE_LAB.white !== false,
+          randColor: !!ASE_LAB.randColor,
           nonlinear: !!ASE_LAB.nonlinear,
           brush: ASE_LAB.brush !== false,
           morphSec: ase3MorphSec(),
