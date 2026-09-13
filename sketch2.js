@@ -6,9 +6,9 @@
 
 const ASE_W = 1000;
 const ASE_H = 1000;
-const ASE_ROWS = 3; // 幾行
-const ASE_COLS = 3; // 幾列
-const ASE_MARGIN = 150; // 離畫布邊緣
+const ASE_ROWS = 4; // 幾行
+const ASE_COLS = 4; // 幾列
+const ASE_MARGIN = 80; // 離畫布邊緣
 const ASE_LENMIN = 0.5; // 最短（格子邊長倍率）
 const ASE_LENMAX = 1.5; // 最長（格子邊長倍率）
 const ASE_ARCS = 3; // 每個位置畫幾條弧
@@ -36,7 +36,11 @@ const ASE_STAR_LEN = 120; // stars：放射線基準長
 const ASE_STAR_STEP = 4; // stars：每步長
 const ASE_STAR_NOISE = 0.025; // stars：Perlin 座標縮放
 //--------------------------------
-const ASE_LAYOUT_N = 40; // 五套造型各幾條，morph 對齊
+const ASE_THREAD_LEN = 3200; // thread：一條棉線總長
+const ASE_THREAD_STEP = 3.2; // thread：每步長
+const ASE_THREAD_NOISE = 0.32; // thread：轉向雜訊
+//--------------------------------
+const ASE_LAYOUT_N = 40; // 線條數量預設，滑桿 2–70
 const ASE_PENCIL_DENS = 3; // 鉛筆 texZoom，原滑桿下限
 const ASE_PAPER = [246, 236, 214];
 const ASE_PD = 2;
@@ -53,6 +57,8 @@ const ASE_LAB = Object.assign({}, MixVein.DEFAULTS, {
   barT: 0,
   branchT: 0,
   starT: 0,
+  threadT: 0,
+  lineN: ASE_LAYOUT_N,
   white: true,
 });
 
@@ -67,12 +73,41 @@ let strokePg;
 let asePencilReady = false;
 let aseBake = null;
 let aseBakePaths = null;
+let aseHudDrag = null;
+let aseHudHover = false;
+let aseHudPress = false;
+let aseHudThumbHover = null;
 let aseMorphCache = null;
 
 function aseClamp(n, lo, hi, fallback) {
   const x = Number(n);
   if (!Number.isFinite(x)) return fallback;
   return Math.max(lo, Math.min(hi, x));
+}
+
+function aseLayoutN() {
+  return Math.round(aseClamp(ASE_LAB.lineN, 2, 70, ASE_LAYOUT_N));
+}
+
+/** 把 total 條分給 buckets 個位置，多的隨機攤。 */
+function aseShareCounts(total, buckets) {
+  const n = Math.max(1, Math.floor(buckets));
+  const t = Math.max(0, Math.floor(total));
+  const counts = new Array(n).fill(0);
+  if (!t) return counts;
+  const base = Math.floor(t / n);
+  let left = t - base * n;
+  for (let i = 0; i < n; i++) counts[i] = base;
+  const order = [];
+  for (let i = 0; i < n; i++) order.push(i);
+  for (let i = order.length - 1; i > 0; i--) {
+    const j = Math.floor(random(i + 1));
+    const tmp = order[i];
+    order[i] = order[j];
+    order[j] = tmp;
+  }
+  for (let k = 0; k < left; k++) counts[order[k % n]]++;
+  return counts;
 }
 
 function aseApplyPreset(o) {
@@ -88,6 +123,7 @@ function aseApplyPreset(o) {
   if (o.leafOff != null) ASE_LAB.leafOff = aseClamp(o.leafOff, -1, 1, 0);
   if (o.leafSw != null) ASE_LAB.leafSw = aseClamp(o.leafSw, 0.5, 6, 1);
   if (o.lineSw != null) ASE_LAB.lineSw = aseClamp(o.lineSw, 0.5, 6, 1);
+  if (o.swMul != null) ASE_LAB.swMul = aseClamp(o.swMul, 0.5, 5, 1);
   if (typeof o.showPath === "boolean") ASE_LAB.showPath = o.showPath;
   if (typeof o.randPath === "boolean") ASE_LAB.randPath = o.randPath;
   if (typeof o.pencil === "boolean") ASE_LAB.pencil = o.pencil;
@@ -95,18 +131,21 @@ function aseApplyPreset(o) {
   if (typeof o.white === "boolean") ASE_LAB.white = o.white;
   if (typeof o.nonlinear === "boolean") ASE_LAB.nonlinear = o.nonlinear;
   if (typeof o.brush === "boolean") ASE_LAB.brush = o.brush;
+  if (o.lineN != null) ASE_LAB.lineN = Math.round(aseClamp(o.lineN, 2, 70, ASE_LAYOUT_N));
   if (
     o.gridT != null ||
     o.concT != null ||
     o.barT != null ||
     o.branchT != null ||
-    o.starT != null
+    o.starT != null ||
+    o.threadT != null
   ) {
     if (o.gridT != null) ASE_LAB.gridT = aseClamp(o.gridT, 0, 1, 1);
     if (o.concT != null) ASE_LAB.concT = aseClamp(o.concT, 0, 1, 0);
     if (o.barT != null) ASE_LAB.barT = aseClamp(o.barT, 0, 1, 0);
     if (o.branchT != null) ASE_LAB.branchT = aseClamp(o.branchT, 0, 1, 0);
     if (o.starT != null) ASE_LAB.starT = aseClamp(o.starT, 0, 1, 0);
+    if (o.threadT != null) ASE_LAB.threadT = aseClamp(o.threadT, 0, 1, 0);
   } else if (o.layoutT != null) {
     const t = aseClamp(o.layoutT, 0, 1, 0);
     ASE_LAB.gridT = 1 - t;
@@ -114,24 +153,49 @@ function aseApplyPreset(o) {
     ASE_LAB.barT = 0;
     ASE_LAB.branchT = 0;
     ASE_LAB.starT = 0;
+    ASE_LAB.threadT = 0;
   } else if (o.layout === "concentric") {
     ASE_LAB.gridT = 0;
     ASE_LAB.concT = 1;
     ASE_LAB.barT = 0;
     ASE_LAB.branchT = 0;
     ASE_LAB.starT = 0;
+    ASE_LAB.threadT = 0;
   } else if (o.layout === "grid") {
     ASE_LAB.gridT = 1;
     ASE_LAB.concT = 0;
     ASE_LAB.barT = 0;
     ASE_LAB.branchT = 0;
     ASE_LAB.starT = 0;
+    ASE_LAB.threadT = 0;
+  } else if (o.layout === "barcode" || o.layout === "bar") {
+    ASE_LAB.gridT = 0;
+    ASE_LAB.concT = 0;
+    ASE_LAB.barT = 1;
+    ASE_LAB.branchT = 0;
+    ASE_LAB.starT = 0;
+    ASE_LAB.threadT = 0;
+  } else if (o.layout === "branch") {
+    ASE_LAB.gridT = 0;
+    ASE_LAB.concT = 0;
+    ASE_LAB.barT = 0;
+    ASE_LAB.branchT = 1;
+    ASE_LAB.starT = 0;
+    ASE_LAB.threadT = 0;
   } else if (o.layout === "star" || o.layout === "stars") {
     ASE_LAB.gridT = 0;
     ASE_LAB.concT = 0;
     ASE_LAB.barT = 0;
     ASE_LAB.branchT = 0;
     ASE_LAB.starT = 1;
+    ASE_LAB.threadT = 0;
+  } else if (o.layout === "thread" || o.layout === "yarn") {
+    ASE_LAB.gridT = 0;
+    ASE_LAB.concT = 0;
+    ASE_LAB.barT = 0;
+    ASE_LAB.branchT = 0;
+    ASE_LAB.starT = 0;
+    ASE_LAB.threadT = 1;
   }
   return true;
 }
@@ -180,6 +244,7 @@ function aseLabOpts(salt) {
     leafOff: ASE_LAB.leafOff,
     leafSw: ASE_LAB.leafSw,
     lineSw: ASE_LAB.lineSw,
+    swMul: ASE_LAB.swMul == null ? 1 : ASE_LAB.swMul,
     showPath: !!ASE_LAB.showPath,
     salt: salt || 0,
   };
@@ -218,11 +283,14 @@ function asePresetObject() {
     leafOff: +Number(ASE_LAB.leafOff).toFixed(2),
     leafSw: +Number(ASE_LAB.leafSw).toFixed(2),
     lineSw: +Number(ASE_LAB.lineSw).toFixed(2),
+    swMul: +Number(ASE_LAB.swMul == null ? 1 : ASE_LAB.swMul).toFixed(2),
     gridT: +Number(ASE_LAB.gridT || 0).toFixed(2),
     concT: +Number(ASE_LAB.concT || 0).toFixed(2),
     barT: +Number(ASE_LAB.barT || 0).toFixed(2),
     branchT: +Number(ASE_LAB.branchT || 0).toFixed(2),
     starT: +Number(ASE_LAB.starT || 0).toFixed(2),
+    threadT: +Number(ASE_LAB.threadT || 0).toFixed(2),
+    lineN: aseLayoutN(),
     nonlinear: !!ASE_LAB.nonlinear,
     brush: ASE_LAB.brush !== false,
   };
@@ -253,6 +321,8 @@ function aseSyncSliders() {
   setText("lab-leaf-sw-v", Number(ASE_LAB.leafSw).toFixed(2));
   set("lab-line-sw", ASE_LAB.lineSw);
   setText("lab-line-sw-v", Number(ASE_LAB.lineSw).toFixed(2));
+  set("lab-sw-mul", ASE_LAB.swMul == null ? 1 : ASE_LAB.swMul);
+  setText("lab-sw-mul-v", Number(ASE_LAB.swMul == null ? 1 : ASE_LAB.swMul).toFixed(2));
   set("lab-leaf-vein", ASE_LAB.leafVein);
   set("lab-leaf-tri", ASE_LAB.leafTri);
   set("lab-leaf-off", ASE_LAB.leafOff);
@@ -282,6 +352,10 @@ function aseSyncSliders() {
   setText("lab-branch-v", Number(ASE_LAB.branchT || 0).toFixed(2));
   set("lab-star", ASE_LAB.starT || 0);
   setText("lab-star-v", Number(ASE_LAB.starT || 0).toFixed(2));
+  set("lab-thread", ASE_LAB.threadT || 0);
+  setText("lab-thread-v", Number(ASE_LAB.threadT || 0).toFixed(2));
+  set("lab-line-n", aseLayoutN());
+  setText("lab-line-n-v", String(aseLayoutN()));
 }
 
 function aseCopyFallback(text, done, fail) {
@@ -728,53 +802,44 @@ function aseCapPaths(paths, n) {
 }
 
 function aseCollectGridPaths() {
+  const need = aseLayoutN();
   const paths = [];
   const rows = Math.max(1, Math.floor(ASE_ROWS));
   const cols = Math.max(1, Math.floor(ASE_COLS));
-  const arcs = Math.max(1, Math.floor(ASE_ARCS));
   const margin = Math.max(0, ASE_MARGIN);
   const innerW = Math.max(1, ASE_W - margin * 2);
   const innerH = Math.max(1, ASE_H - margin * 2);
   const cellW = innerW / cols;
   const cellH = innerH / rows;
   const span = Math.min(cellW, cellH);
+  const cells = [];
   for (let row = 0; row < rows; row++) {
     for (let col = 0; col < cols; col++) {
-      const x = margin + (col + 0.5) * cellW;
-      const y = margin + (row + 0.5) * cellH;
-      for (let k = 0; k < arcs; k++) {
-        const len = span * random(ASE_LENMIN, ASE_LENMAX);
-        const pts = aseMakeArc(x, y, len, len);
-        if (pts.length >= 2) {
-          paths.push({
-            pts,
-            salt: row * 17.3 + col * 0.41 + k * 3.1,
-            closed: false,
-            hub: { x, y },
-          });
-        }
+      cells.push({
+        row,
+        col,
+        x: margin + (col + 0.5) * cellW,
+        y: margin + (row + 0.5) * cellH,
+      });
+    }
+  }
+  const counts = aseShareCounts(need, cells.length);
+  for (let i = 0; i < cells.length; i++) {
+    const c = cells[i];
+    for (let k = 0; k < counts[i]; k++) {
+      const len = span * random(ASE_LENMIN, ASE_LENMAX);
+      const pts = aseMakeArc(c.x, c.y, len, len);
+      if (pts.length >= 2) {
+        paths.push({
+          pts,
+          salt: c.row * 17.3 + c.col * 0.41 + k * 3.1,
+          closed: false,
+          hub: { x: c.x, y: c.y },
+        });
       }
     }
   }
-  let extra = 0;
-  while (paths.length < ASE_LAYOUT_N && extra < ASE_LAYOUT_N * 3) {
-    const row = Math.floor(random(rows));
-    const col = Math.floor(random(cols));
-    const x = margin + (col + 0.5) * cellW;
-    const y = margin + (row + 0.5) * cellH;
-    const len = span * random(ASE_LENMIN, ASE_LENMAX);
-    const pts = aseMakeArc(x, y, len, len);
-    if (pts.length >= 2) {
-      paths.push({
-        pts,
-        salt: row * 17.3 + col * 0.41 + (arcs + extra) * 3.1,
-        closed: false,
-        hub: { x, y },
-      });
-    }
-    extra++;
-  }
-  return aseCapPaths(paths, ASE_LAYOUT_N);
+  return aseCapPaths(paths, need);
 }
 
 /** 一圈拆成 1–4 段開放弧，避免一筆畫到底。 */
@@ -809,13 +874,17 @@ function aseSplitRing(pts, salt) {
 }
 
 function aseCollectConcentricPaths() {
+  const need = aseLayoutN();
   const paths = [];
   const cx = ASE_W * 0.5 + random(-100, 100);
   const cy = ASE_H * 0.5 + random(-100, 100);
   const scale = Math.max(0.05, Number(ASE_RING_SCALE) || 1);
   const gap = Math.max(8, ASE_RING_GAP);
-  const copiesMax = Math.max(1, Math.floor(ASE_RING_COPIES));
-  const rings = Math.max(1, Math.floor(ASE_RINGS));
+  const copiesMax = Math.max(
+    1,
+    Math.round(ASE_RING_COPIES * Math.sqrt(need / ASE_LAYOUT_N))
+  );
+  const rings = Math.max(1, Math.round(ASE_RINGS * (need / ASE_LAYOUT_N)));
   for (let i = 1; i <= rings; i++) {
     const baseR = i * gap * scale;
     const copies = 1 + Math.floor(random(copiesMax));
@@ -836,7 +905,7 @@ function aseCollectConcentricPaths() {
     }
   }
   let extra = 0;
-  while (paths.length < ASE_LAYOUT_N && extra < ASE_LAYOUT_N * 4) {
+  while (paths.length < need && extra < need * 4) {
     const i = 1 + Math.floor(random(rings));
     const baseR = i * gap * scale;
     const r = baseR * random(0.96, 1.05);
@@ -854,13 +923,13 @@ function aseCollectConcentricPaths() {
       paths.push(bits[b]);
     }
   }
-  return aseCapPaths(paths, ASE_LAYOUT_N);
+  return aseCapPaths(paths, need);
 }
 
 /** 畫面中央一排斜線，Perlin 微彎，間隔聚散像條碼。 */
 function aseCollectBarcodePaths() {
   const paths = [];
-  const n = Math.max(4, ASE_LAYOUT_N);
+  const n = aseLayoutN();
   const margin = Math.max(40, ASE_MARGIN * 0.55);
   const innerW = Math.max(1, ASE_W - margin * 2);
   const cy = ASE_H * 0.5;
@@ -914,7 +983,7 @@ function aseCollectBarcodePaths() {
         });
       }
     }
-  return aseCapPaths(paths, ASE_LAYOUT_N);
+  return aseCapPaths(paths, n);
 }
 
 function aseAngWrap(a) {
@@ -925,12 +994,19 @@ function aseAngWrap(a) {
 
 /** 中心往外長：主枝均勻占角度，Perlin 只做微彎，避免全擠一邊。 */
 function aseCollectBranchPaths() {
+  const need = aseLayoutN();
   const cx = ASE_W * 0.5 + random(-100, 100);
   const cy = ASE_H * 0.5 + random(-100, 100);
   const freq = Math.max(0.005, ASE_BRANCH_NOISE);
   const step = Math.max(0.5, ASE_BRANCH_STEP);
-  const liveMax = Math.max(4, Math.floor(ASE_BRANCH_MAX));
-  const seeds = Math.max(3, Math.floor(ASE_BRANCH_SEEDS));
+  const liveMax = Math.max(
+    3,
+    Math.round(ASE_BRANCH_MAX * (need / ASE_LAYOUT_N))
+  );
+  const seeds = Math.max(
+    2,
+    Math.min(need, Math.round(ASE_BRANCH_SEEDS * (need / ASE_LAYOUT_N)))
+  );
   const spin = random(Math.PI * 2);
   const busy = Math.floor(random(seeds));
   const live = [];
@@ -1022,8 +1098,8 @@ function aseCollectBranchPaths() {
     });
   }
   let pad = 0;
-  while (paths.length < ASE_LAYOUT_N && pad < ASE_LAYOUT_N) {
-    const home = spin + (paths.length / ASE_LAYOUT_N) * Math.PI * 2 + random(-0.1, 0.1);
+  while (paths.length < need && pad < need) {
+    const home = spin + (paths.length / need) * Math.PI * 2 + random(-0.1, 0.1);
     let x = cx + Math.cos(home) * 8;
     let y = cy + Math.sin(home) * 8;
     let dir = home;
@@ -1045,10 +1121,10 @@ function aseCollectBranchPaths() {
     });
     pad++;
   }
-  return aseCapPaths(paths, ASE_LAYOUT_N);
+  return aseCapPaths(paths, need);
 }
 
-/** 滿天星：先撒 7–12 點，每點往外放射，總條數對齊 ASE_LAYOUT_N。 */
+/** 滿天星：星數隨線數縮放，每點往外放射，總條數對齊 aseLayoutN。 */
 function aseScatterStars(count) {
   const margin = Math.max(90, ASE_MARGIN * 0.65);
   const minDist = 88;
@@ -1079,33 +1155,30 @@ function aseScatterStars(count) {
 }
 
 function aseCollectStarPaths() {
-  const lo = Math.max(3, Math.floor(ASE_STAR_MIN));
-  const hi = Math.max(lo, Math.floor(ASE_STAR_MAX));
+  const need = aseLayoutN();
+  const lo = Math.max(
+    1,
+    Math.min(need, Math.round(ASE_STAR_MIN * (need / ASE_LAYOUT_N)))
+  );
+  const hi = Math.max(
+    lo,
+    Math.min(need, Math.round(ASE_STAR_MAX * (need / ASE_LAYOUT_N)))
+  );
   const n = lo + Math.floor(random(hi - lo + 1));
   const centers = aseScatterStars(n);
-  const need = Math.max(n, ASE_LAYOUT_N);
-  const counts = new Array(n).fill(Math.floor(need / n));
-  let left = need - counts.reduce((s, v) => s + v, 0);
-  const order = [];
-  for (let i = 0; i < n; i++) order.push(i);
-  for (let i = order.length - 1; i > 0; i--) {
-    const j = Math.floor(random(i + 1));
-    const tmp = order[i];
-    order[i] = order[j];
-    order[j] = tmp;
-  }
-  for (let k = 0; k < left; k++) counts[order[k % n]]++;
+  const counts = aseShareCounts(need, n);
   const freq = Math.max(0.004, ASE_STAR_NOISE);
   const step = Math.max(0.5, ASE_STAR_STEP);
   const baseLen = Math.max(24, ASE_STAR_LEN);
   const paths = [];
   for (let i = 0; i < n; i++) {
     const c = centers[i];
-    const rays = Math.max(2, counts[i]);
+    const rays = counts[i];
+    if (rays < 1) continue;
     const spin = random(Math.PI * 2);
     for (let j = 0; j < rays; j++) {
       const home = spin + (j / rays) * Math.PI * 2 + random(-0.18, 0.18);
-      const reach = baseLen * random(0.42, 1.28);
+      const reach = baseLen * random(0.5, 1.5);
       const life = Math.max(8, Math.round(reach / step));
       let x = c.x + Math.cos(home) * 3;
       let y = c.y + Math.sin(home) * 3;
@@ -1127,7 +1200,179 @@ function aseCollectStarPaths() {
       });
     }
   }
-  return aseCapPaths(paths, ASE_LAYOUT_N);
+  return aseCapPaths(paths, need);
+}
+
+/** 這一段屬於哪個打結：先看圓圈重疊，否則就近。 */
+function asePickSliceHub(knots, i0, i1, slice, fallback) {
+  if (!knots || !knots.length) return { x: fallback.x, y: fallback.y };
+  let best = null;
+  let bestOv = 0;
+  for (let i = 0; i < knots.length; i++) {
+    const a = Math.max(i0, knots[i].i0);
+    const b = Math.min(i1, knots[i].i1);
+    const ov = b - a;
+    if (ov > bestOv) {
+      bestOv = ov;
+      best = knots[i];
+    }
+  }
+  if (best) return { x: best.x, y: best.y };
+  let sx = 0;
+  let sy = 0;
+  const m = slice && slice.length ? slice.length : 0;
+  for (let i = 0; i < m; i++) {
+    sx += slice[i].x;
+    sy += slice[i].y;
+  }
+  const cx = m ? sx / m : fallback.x;
+  const cy = m ? sy / m : fallback.y;
+  let near = knots[0];
+  let bestD = Infinity;
+  for (let i = 0; i < knots.length; i++) {
+    const d = Math.hypot(cx - knots[i].x, cy - knots[i].y);
+    if (d < bestD) {
+      bestD = d;
+      near = knots[i];
+    }
+  }
+  return { x: near.x, y: near.y };
+}
+
+/** 一條開折線依長度切成 n 段，段與段共一個端點。 */
+function aseSplitOpenPolyline(pts, n, hub, salt0, knots) {
+  const paths = [];
+  if (!pts || pts.length < 2 || n < 1) return paths;
+  const cum = [0];
+  for (let i = 1; i < pts.length; i++) {
+    cum.push(
+      cum[i - 1] + Math.hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y)
+    );
+  }
+  const total = cum[cum.length - 1];
+  if (total < 1) return paths;
+  const atLen = (L) => {
+    L = Math.max(0, Math.min(total, L));
+    let lo = 0;
+    let hi = cum.length - 1;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (cum[mid] < L) lo = mid + 1;
+      else hi = mid;
+    }
+    const i = Math.max(1, lo);
+    const a = pts[i - 1];
+    const b = pts[i];
+    const seg = cum[i] - cum[i - 1] || 1;
+    const t = (L - cum[i - 1]) / seg;
+    return {
+      x: a.x + (b.x - a.x) * t,
+      y: a.y + (b.y - a.y) * t,
+      idx: i,
+    };
+  };
+  for (let s = 0; s < n; s++) {
+    const a = atLen((s / n) * total);
+    const b = atLen(((s + 1) / n) * total);
+    const slice = [{ x: a.x, y: a.y }];
+    for (let i = a.idx; i < b.idx; i++) slice.push(pts[i]);
+    const last = slice[slice.length - 1];
+    if (!last || Math.hypot(last.x - b.x, last.y - b.y) > 0.02) {
+      slice.push({ x: b.x, y: b.y });
+    }
+    if (slice.length < 2) {
+      slice.push({ x: b.x + 0.4, y: b.y + 0.4 });
+    }
+    paths.push({
+      pts: slice,
+      closed: false,
+      salt: salt0 + s * 2.17,
+      hub: asePickSliceHub(knots, a.idx, b.idx, slice, hub),
+    });
+  }
+  return paths;
+}
+
+/** 棉線：一半上到下掉落，一半左到右；海龜走步＋就地繞圈。 */
+function aseCollectThreadPaths() {
+  const margin = Math.max(70, ASE_MARGIN * 0.48);
+  const step = Math.max(1.2, ASE_THREAD_STEP);
+  const target = Math.max(800, ASE_THREAD_LEN);
+  const across = aseRng(aseHashSeed(aseSeed, 8.17))() < 0.5;
+  const home = across ? 0 : Math.PI * 0.5;
+  let x = across
+    ? random(margin * 0.45, ASE_W * 0.22)
+    : random(ASE_W * 0.32, ASE_W * 0.68);
+  let y = across
+    ? random(ASE_H * 0.32, ASE_H * 0.68)
+    : random(margin * 0.45, ASE_H * 0.22);
+  let dir = home + random(-0.85, 0.85);
+  const hub = { x, y };
+  const pts = [{ x, y }];
+  const knots = [];
+  let walked = 0;
+  let cool = 36;
+  let i = 0;
+  const floorY = ASE_H - margin;
+  const wallX = ASE_W - margin;
+  while (walked < target && i < 5600) {
+    i++;
+    cool--;
+    if (cool < 0 && walked > 70 && random() < 0.04) {
+      const tight = random() < 0.8;
+      const turns = tight ? random(1.35, 3.35) : random(0.72, 1.42);
+      const rad = tight ? random(6, 20) : random(24, 54);
+      const side = random() < 0.5 ? -1 : 1;
+      const n = Math.max(10, Math.round((turns * Math.PI * 2 * rad) / step));
+      const cx = x + Math.cos(dir + side * Math.PI * 0.5) * rad;
+      const cy = y + Math.sin(dir + side * Math.PI * 0.5) * rad;
+      const a0 = Math.atan2(y - cy, x - cx);
+      const i0 = pts.length - 1;
+      for (let k = 1; k <= n; k++) {
+        const a = a0 + side * (k / n) * turns * Math.PI * 2;
+        const rr = rad * (0.86 + 0.2 * noise(k * 0.07, i * 0.03));
+        x = cx + Math.cos(a) * rr;
+        y = cy + Math.sin(a) * rr;
+        x = Math.max(margin * 0.45, Math.min(ASE_W - margin * 0.45, x));
+        y = Math.max(margin * 0.35, Math.min(ASE_H - margin * 0.35, y));
+        pts.push({ x, y });
+        walked += step;
+      }
+      knots.push({ x: cx, y: cy, i0, i1: pts.length - 1 });
+      dir = a0 + side * turns * Math.PI * 2 + side * Math.PI * 0.5;
+      cool = 14 + Math.floor(random(8, 28));
+      continue;
+    }
+    const wob = (noise(x * 0.01, y * 0.01, i * 0.015) - 0.5) * ASE_THREAD_NOISE;
+    dir += wob + random(-0.09, 0.09);
+    dir += 0.05 * Math.sin(i * 0.023);
+    dir += aseAngWrap(home - dir) * 0.03;
+    if (across) {
+      if (y < margin) dir += aseAngWrap(Math.PI * 0.5 - dir) * 0.4;
+      if (y > ASE_H - margin) dir += aseAngWrap(-Math.PI * 0.5 - dir) * 0.4;
+      if (x < margin) dir += aseAngWrap(0 - dir) * 0.38;
+      if (x > wallX) {
+        x = wallX;
+        dir = Math.PI + random(-1.05, 1.05);
+      }
+    } else {
+      if (x < margin) dir += aseAngWrap(0 - dir) * 0.38;
+      if (x > ASE_W - margin) dir += aseAngWrap(Math.PI - dir) * 0.38;
+      if (y < margin) dir += aseAngWrap(Math.PI * 0.5 - dir) * 0.4;
+      if (y > floorY) {
+        y = floorY;
+        dir = -Math.PI * 0.5 + random(-1.05, 1.05);
+      }
+    }
+    x += step * Math.cos(dir);
+    y += step * Math.sin(dir);
+    x = Math.max(margin * 0.4, Math.min(ASE_W - margin * 0.4, x));
+    y = Math.max(margin * 0.3, Math.min(ASE_H - margin * 0.28, y));
+    pts.push({ x, y });
+    walked += step;
+  }
+  if (!knots.length) knots.push({ x: hub.x, y: hub.y, i0: 0, i1: pts.length - 1 });
+  return aseSplitOpenPolyline(pts, aseLayoutN(), hub, 440, knots);
 }
 
 const ASE_MORPH_N = 48;
@@ -1262,11 +1507,18 @@ function aseMatchTwo(listA, listB) {
 }
 
 function aseBlankBundle() {
-  return { grid: null, conc: null, bar: null, branch: null, star: null };
+  return {
+    grid: null,
+    conc: null,
+    bar: null,
+    branch: null,
+    star: null,
+    thread: null,
+  };
 }
 
 function aseBundleAnchor(b) {
-  return b.grid || b.conc || b.bar || b.branch || b.star;
+  return b.grid || b.conc || b.bar || b.branch || b.star || b.thread;
 }
 
 function aseAttachSide(bundles, key, paths) {
@@ -1307,18 +1559,20 @@ function aseAttachSide(bundles, key, paths) {
   return out;
 }
 
-/** 五套造型同一條身份，長線對長線。 */
-function aseMatchBundles(grid, conc, bars, branches, stars) {
+/** 六套造型同一條身份，長線對長線。 */
+function aseMatchBundles(grid, conc, bars, branches, stars, threads) {
   let bundles = aseMatchTwo(grid, conc).map((p) => ({
     grid: p.a,
     conc: p.b,
     bar: null,
     branch: null,
     star: null,
+    thread: null,
   }));
   bundles = aseAttachSide(bundles, "bar", bars);
   bundles = aseAttachSide(bundles, "branch", branches);
   bundles = aseAttachSide(bundles, "star", stars);
+  bundles = aseAttachSide(bundles, "thread", threads);
   return bundles;
 }
 
@@ -1423,17 +1677,20 @@ function aseMorphWeights() {
   let wB = aseMorphMap("barT");
   let wR = aseMorphMap("branchT");
   let wS = aseMorphMap("starT");
-  let sum = wG + wC + wB + wR + wS;
-  if (sum <= 1e-6) return { wG: 0, wC: 0, wB: 0, wR: 0, wS: 0, wRest: 1, sum: 0 };
+  let wT = aseMorphMap("threadT");
+  let sum = wG + wC + wB + wR + wS + wT;
+  if (sum <= 1e-6)
+    return { wG: 0, wC: 0, wB: 0, wR: 0, wS: 0, wT: 0, wRest: 1, sum: 0 };
   if (sum > 1) {
     wG /= sum;
     wC /= sum;
     wB /= sum;
     wR /= sum;
     wS /= sum;
+    wT /= sum;
     sum = 1;
   }
-  return { wG, wC, wB, wR, wS, wRest: 1 - sum, sum };
+  return { wG, wC, wB, wR, wS, wT, wRest: 1 - sum, sum };
 }
 
 function aseMorphBundles(bundles, pack, weights) {
@@ -1444,6 +1701,7 @@ function aseMorphBundles(bundles, pack, weights) {
   const barHub0 = asePackHub(pack.bars);
   const branchHub0 = asePackHub(pack.branches);
   const starHub0 = asePackHub(pack.stars);
+  const threadHub0 = asePackHub(pack.threads);
   const out = [];
   for (let i = 0; i < list.length; i++) {
     const g = list[i].grid;
@@ -1451,28 +1709,33 @@ function aseMorphBundles(bundles, pack, weights) {
     const b = list[i].bar;
     const r = list[i].branch;
     const s = list[i].star;
+    const th = list[i].thread;
     const gHub = asePathHub(g, gridHub0);
     const cHub = asePathHub(c, concHub0);
     const bHub = asePathHub(b, barHub0);
     const rHub = asePathHub(r, branchHub0);
     const sHub = asePathHub(s, starHub0);
+    const tHub = asePathHub(th, threadHub0);
     let pg = aseSampleSide(g, g && g.closed, gHub);
     let pc = aseSampleSide(c, c && c.closed, cHub);
     let pb = aseSampleSide(b, b && b.closed, bHub);
     let pr = aseSampleSide(r, r && r.closed, rHub);
     let ps = aseSampleSide(s, s && s.closed, sHub);
-    if (!pg || !pc || !pb || !pr || !ps) continue;
-    const ref = g ? pg[0] : c ? pc[0] : b ? pb[0] : r ? pr[0] : ps[0];
+    let pt = aseSampleSide(th, th && th.closed, tHub);
+    if (!pg || !pc || !pb || !pr || !ps || !pt) continue;
+    const ref = g ? pg[0] : c ? pc[0] : b ? pb[0] : r ? pr[0] : s ? ps[0] : pt[0];
     if (c) pc = aseAlignPts(pc, !!c.closed, ref);
     if (b) pb = aseAlignPts(pb, !!b.closed, ref);
     if (r) pr = aseAlignPts(pr, !!r.closed, ref);
     if (s) ps = aseAlignPts(ps, !!s.closed, ref);
+    if (th) pt = aseAlignPts(pt, !!th.closed, ref);
     const live = [
       { pts: pg, w: weights.wG, hub: gHub },
       { pts: pc, w: weights.wC, hub: cHub },
       { pts: pb, w: weights.wB, hub: bHub },
       { pts: pr, w: weights.wR, hub: rHub },
       { pts: ps, w: weights.wS, hub: sHub },
+      { pts: pt, w: weights.wT, hub: tHub },
     ];
     let hx = 0;
     let hy = 0;
@@ -1494,6 +1757,7 @@ function aseMorphBundles(bundles, pack, weights) {
         weights.wB * weights.wB +
         weights.wR * weights.wR +
         weights.wS * weights.wS +
+        weights.wT * weights.wT +
         weights.wRest * weights.wRest);
     const pulse = Math.sin(Math.max(0, energy) * Math.PI);
     const salt =
@@ -1506,7 +1770,9 @@ function aseMorphBundles(bundles, pack, weights) {
               ? b.salt
               : r && r.salt != null
                 ? r.salt
-                : s && s.salt
+                : s && s.salt != null
+                  ? s.salt
+                  : th && th.salt
       ) || i;
     const pts = [];
     for (let k = 0; k < ASE_MORPH_N; k++) {
@@ -1568,13 +1834,16 @@ function aseMorphBundles(bundles, pack, weights) {
               ? b.salt
               : r && r.salt != null
                 ? r.salt
-                : s && s.salt,
+                : s && s.salt != null
+                  ? s.salt
+                  : th && th.salt,
       accent:
         !!(g && g.accent) ||
         !!(c && c.accent) ||
         !!(b && b.accent) ||
         !!(r && r.accent) ||
-        !!(s && s.accent),
+        !!(s && s.accent) ||
+        !!(th && th.accent),
     });
   }
   return out;
@@ -1610,7 +1879,10 @@ function aseMorphCacheKey() {
     ASE_STAR_LEN,
     ASE_STAR_STEP,
     ASE_STAR_NOISE,
-    ASE_LAYOUT_N,
+    ASE_THREAD_LEN,
+    ASE_THREAD_STEP,
+    ASE_THREAD_NOISE,
+    aseLayoutN(),
   ].join("|");
 }
 
@@ -1631,6 +1903,7 @@ function aseStampBundleSalts(bundles) {
     const b = bundles[i].bar;
     const r = bundles[i].branch;
     const s = bundles[i].star;
+    const th = bundles[i].thread;
     const salt =
       g && g.salt != null
         ? g.salt
@@ -1642,7 +1915,9 @@ function aseStampBundleSalts(bundles) {
               ? r.salt
               : s && s.salt != null
                 ? s.salt
-                : i * 1.37;
+                : th && th.salt != null
+                  ? th.salt
+                  : i * 1.37;
     const accent = !!(g && g.accent);
     if (g) g.salt = salt;
     if (c) {
@@ -1660,6 +1935,10 @@ function aseStampBundleSalts(bundles) {
     if (s) {
       s.salt = salt;
       s.accent = accent;
+    }
+    if (th) {
+      th.salt = salt;
+      th.accent = accent;
     }
   }
 }
@@ -1682,10 +1961,13 @@ function aseEnsureMorphCache() {
   randomSeed(aseSeed);
   noiseSeed(aseSeed);
   const stars = aseCollectStarPaths();
+  randomSeed(aseSeed);
+  noiseSeed(aseSeed);
+  const threads = aseCollectThreadPaths();
   aseMarkLongLayout(grid);
-  const bundles = aseMatchBundles(grid, conc, bars, branches, stars);
+  const bundles = aseMatchBundles(grid, conc, bars, branches, stars, threads);
   aseStampBundleSalts(bundles);
-  aseMorphCache = { key, grid, conc, bars, branches, stars, bundles };
+  aseMorphCache = { key, grid, conc, bars, branches, stars, threads, bundles };
   return aseMorphCache;
 }
 
@@ -1693,7 +1975,7 @@ function aseLayoutWeight(key) {
   return aseClamp(ASE_LAB[key], 0, 1, 0);
 }
 
-/** 同一條線在五套造型間插值；只開一端則用該端原路徑。 */
+/** 同一條線在六套造型間插值；只開一端則用該端原路徑。 */
 function aseCollectPaths() {
   const pack = aseEnsureMorphCache();
   const wG = aseLayoutWeight("gridT");
@@ -1701,18 +1983,21 @@ function aseCollectPaths() {
   const wB = aseLayoutWeight("barT");
   const wR = aseLayoutWeight("branchT");
   const wS = aseLayoutWeight("starT");
+  const wT = aseLayoutWeight("threadT");
   const live =
     (wG > 1e-6 ? 1 : 0) +
     (wC > 1e-6 ? 1 : 0) +
     (wB > 1e-6 ? 1 : 0) +
     (wR > 1e-6 ? 1 : 0) +
-    (wS > 1e-6 ? 1 : 0);
+    (wS > 1e-6 ? 1 : 0) +
+    (wT > 1e-6 ? 1 : 0);
   if (live === 0) return [];
   if (live === 1 && wG >= 1) return pack.grid;
   if (live === 1 && wC >= 1) return pack.conc;
   if (live === 1 && wB >= 1) return pack.bars;
   if (live === 1 && wR >= 1) return pack.branches;
   if (live === 1 && wS >= 1) return pack.stars;
+  if (live === 1 && wT >= 1) return pack.threads;
   return aseMorphBundles(pack.bundles, pack, aseMorphWeights());
 }
 
@@ -1732,6 +2017,9 @@ function aseLayoutCaption() {
   }
   if (aseLayoutWeight("starT") > 0) {
     bits.push("star " + aseLayoutWeight("starT").toFixed(2));
+  }
+  if (aseLayoutWeight("threadT") > 0) {
+    bits.push("thread " + aseLayoutWeight("threadT").toFixed(2));
   }
   if (!bits.length) return "none";
   return bits.length > 1 ? "morph " + bits.join(" · ") : bits[0];
@@ -1793,6 +2081,12 @@ function aseMarkAccent(strokes) {
 
 function aseInkColor(stroke) {
   if (stroke && stroke.accent && ASE_LAB.white !== false) return color(255);
+  if (ASE_LAB.pencil) {
+    const salt = Number(stroke && stroke.pathSalt);
+    const id = Number.isFinite(salt) ? salt : Number(stroke && stroke.sw) || 0;
+    const mul = 0.5 + aseRng(aseHashSeed(aseSeed, id + 4.9))() * 0.5;
+    return color(30 * mul, 110 * mul, 230 * mul);
+  }
   return color(50);
 }
 
@@ -1890,6 +2184,313 @@ function aseDrawPathGuides(paths) {
   pop();
 }
 
+const ASE_HUD_SLIDES = [
+  ["gridT", "grid"],
+  ["concT", "concentric"],
+  ["barT", "barcode"],
+  ["branchT", "branch"],
+  ["starT", "stars"],
+  ["threadT", "thread"],
+];
+
+function aseHudGeom() {
+  const labelW = 108;
+  const labelGap = 16;
+  const trackW = 268;
+  const colGap = 64;
+  const colW = labelW + labelGap + trackW;
+  const pad = (ASE_W - (colW * 2 + colGap)) * 0.5;
+  const rowH = 42;
+  const y0 = ASE_H - 48 - 4 * rowH;
+  const cols = [pad, pad + colW + colGap];
+  const countTrackX = cols[0] + labelW + labelGap;
+  const count = {
+    key: "lineN",
+    kind: "count",
+    label: "線條數量",
+    y: y0,
+    labelX: cols[0],
+    trackX: countTrackX,
+    trackW,
+    trackY: y0 + rowH * 0.5,
+    trackSalt: 12,
+    hit: {
+      x: countTrackX - 12,
+      y: y0 - 4,
+      w: trackW + 24,
+      h: rowH + 8,
+    },
+  };
+  const morphY0 = y0 + rowH;
+  const rows = [];
+  for (let i = 0; i < ASE_HUD_SLIDES.length; i++) {
+    const col = i < 3 ? 0 : 1;
+    const row = i < 3 ? i : i - 3;
+    const x = cols[col];
+    const y = morphY0 + row * rowH;
+    const trackX = x + labelW + labelGap;
+    rows.push({
+      key: ASE_HUD_SLIDES[i][0],
+      label: ASE_HUD_SLIDES[i][1],
+      y,
+      labelX: x,
+      trackX,
+      trackW,
+      trackY: y + rowH * 0.5,
+      trackSalt: 20 + i * 5,
+      hit: { x: trackX - 12, y: y - 4, w: trackW + 24, h: rowH + 8 },
+    });
+  }
+  const rightTrackX = cols[1] + labelW + labelGap;
+  const btnW = colW * 0.7;
+  const trackRight = rightTrackX + trackW;
+  return {
+    count,
+    rows,
+    btn: {
+      x: trackRight - btnW,
+      y: y0 + (rowH - 30) * 0.5,
+      w: btnW,
+      h: 30,
+    },
+    rightTrackX,
+  };
+}
+
+function aseHudLine(x0, y0, x1, y1, salt, n, ampX, ampY) {
+  n = Math.max(8, n || 18);
+  const dx = x1 - x0;
+  const dy = y1 - y0;
+  const len = Math.hypot(dx, dy) || 1;
+  const ux = dx / len;
+  const uy = dy / len;
+  const px = -uy;
+  const py = ux;
+  const side = ampY == null ? 1.8 : ampY;
+  const along = ampX == null ? 0.7 : ampX * 0.35;
+  const pts = [];
+  for (let i = 0; i <= n; i++) {
+    const t = i / n;
+    const n1 = noise(salt * 0.11 + t * 7.2, salt * 0.07);
+    const n2 = noise(salt * 0.19 + t * 13.4 + 9, salt * 0.13);
+    const n3 = noise(t * 4.8 + salt * 0.05, 5.2);
+    const wob = ((n1 - 0.5) * 1.35 + (n2 - 0.5) * 0.55) * side;
+    const slide = (n3 - 0.5) * along;
+    pts.push({
+      x: x0 + dx * t + px * wob + ux * slide,
+      y: y0 + dy * t + py * wob + uy * slide,
+    });
+  }
+  return pts;
+}
+
+function aseHudAt(x0, y0, x1, y1, salt, n, ampX, ampY, u) {
+  const pts = aseHudLine(x0, y0, x1, y1, salt, n, ampX, ampY);
+  if (!pts.length) return { x: x0, y: y0 };
+  const i = aseClamp(u, 0, 1, 0) * (pts.length - 1);
+  const lo = Math.max(0, Math.floor(i));
+  const hi = Math.min(pts.length - 1, lo + 1);
+  const f = i - lo;
+  return {
+    x: pts[lo].x + (pts[hi].x - pts[lo].x) * f,
+    y: pts[lo].y + (pts[hi].y - pts[lo].y) * f,
+  };
+}
+
+function aseHudDrawX(cx, cy, salt, weight, arm, col) {
+  const a = arm == null ? 8 : arm;
+  const w = weight == null ? 2.8 : weight;
+  aseHudStroke(
+    aseHudLine(cx - a, cy - a, cx + a, cy + a, salt, 8, 1.1, 1.4),
+    w,
+    col,
+    3
+  );
+  aseHudStroke(
+    aseHudLine(cx + a, cy - a, cx - a, cy + a, salt + 5, 8, 1.1, 1.4),
+    w,
+    col,
+    3
+  );
+}
+
+function aseHudStroke(pts, weight, col, passes) {
+  if (!pts || pts.length < 2) return;
+  noFill();
+  strokeCap(ROUND);
+  strokeJoin(ROUND);
+  const n = passes == null ? 3 : passes;
+  for (let k = 0; k < n; k++) {
+    const a = 46 + k * 58;
+    stroke(red(col), green(col), blue(col), a);
+    strokeWeight(weight * (0.42 + k * 0.28));
+    beginShape();
+    for (let i = 0; i < pts.length; i++) {
+      vertex(pts[i].x, pts[i].y);
+    }
+    endShape();
+  }
+}
+
+function aseHudRect(x, y, w, h, salt, weight) {
+  const ink = color(42, 38, 32);
+  const sw = weight == null ? 1.35 : weight;
+  for (let loop = 0; loop < 2; loop++) {
+    const s = salt + loop * 11;
+    const ox = loop * 0.9;
+    const oy = loop * 0.7;
+    const over = 4 + loop;
+    aseHudStroke(
+      aseHudLine(x - over, y + oy, x + w + over, y + oy, s, 18, 1.3, 0.7),
+      sw,
+      ink,
+      2
+    );
+    aseHudStroke(
+      aseHudLine(x + w + ox, y - 3, x + w + ox, y + h + 3, s + 3, 10, 0.7, 1.3),
+      sw,
+      ink,
+      2
+    );
+    aseHudStroke(
+      aseHudLine(x + w + over, y + h - oy, x - over, y + h - oy, s + 6, 18, 1.3, 0.7),
+      sw,
+      ink,
+      2
+    );
+    aseHudStroke(
+      aseHudLine(x - ox, y + h + 3, x - ox, y - 3, s + 9, 10, 0.7, 1.3),
+      sw,
+      ink,
+      2
+    );
+  }
+}
+
+function aseHudRowT(row) {
+  if (row && row.kind === "count") {
+    return (aseLayoutN() - 2) / 68;
+  }
+  return aseClamp(ASE_LAB[row.key], 0, 1, 0);
+}
+
+function aseHudApplyRow(row, x) {
+  const u = aseHudFromX(row, x);
+  if (row && row.kind === "count") {
+    ASE_LAB.lineN = Math.round(2 + u * 68);
+    ASE_LAB.lineN = Math.round(aseClamp(ASE_LAB.lineN, 2, 70, ASE_LAYOUT_N));
+    aseSyncSliders();
+    aseSaveLs();
+    if (ASE_LAB.live === false) redraw();
+    else aseMaybeRedraw();
+    return;
+  }
+  aseHudSetT(row.key, u);
+}
+
+function aseHudDrawTrack(row, i) {
+  const ink = color(42, 38, 32);
+  const dark = color(18, 16, 14);
+  const t = aseHudRowT(row);
+  noStroke();
+  fill(42, 38, 32, 200);
+  textAlign(LEFT, CENTER);
+  textSize(13);
+  text(row.label, row.labelX, row.trackY);
+  const x1 = row.trackX + row.trackW;
+  const salt = row.trackSalt;
+  aseHudStroke(
+    aseHudLine(row.trackX, row.trackY, x1, row.trackY, salt, 36, 1.1, 3.4),
+    1.35,
+    ink,
+    2
+  );
+  if (t > 0.01) {
+    const xm = row.trackX + row.trackW * t;
+    aseHudStroke(
+      aseHudLine(row.trackX, row.trackY, xm, row.trackY, salt, 32, 1.1, 3.4),
+      3.6,
+      dark,
+      3
+    );
+  }
+  const p = aseHudAt(
+    row.trackX,
+    row.trackY,
+    x1,
+    row.trackY,
+    salt,
+    36,
+    1.1,
+    3.4,
+    t
+  );
+  const hot = aseHudDrag === row.key || aseHudThumbHover === row.key;
+  aseHudDrawX(p.x, p.y, 140 + i * 3, hot ? 4.2 : 3.1, hot ? 7 : 5.95, dark);
+}
+
+function aseDrawHud() {
+  const g = aseHudGeom();
+  push();
+  aseHudDrawTrack(g.count, -1);
+  for (let i = 0; i < g.rows.length; i++) {
+    aseHudDrawTrack(g.rows[i], i);
+  }
+  const seedW = aseHudPress ? 3.4 : aseHudHover ? 2.9 : 1.35;
+  const seedDy = aseHudPress ? 1 : 0;
+  aseHudRect(g.btn.x, g.btn.y + seedDy, g.btn.w, g.btn.h, 240, seedW);
+  noStroke();
+  fill(42, 38, 32, aseHudPress ? 255 : 220);
+  textAlign(CENTER, CENTER);
+  textSize(12);
+  text(
+    "seed=" + aseSeed,
+    g.btn.x + g.btn.w * 0.5,
+    g.btn.y + g.btn.h * 0.5 + 1 + seedDy
+  );
+  pop();
+}
+
+function aseHudInside(box, x, y) {
+  return x >= box.x && x <= box.x + box.w && y >= box.y && y <= box.y + box.h;
+}
+
+function aseHudSetT(key, t) {
+  ASE_LAB[key] = aseClamp(t, 0, 1, 0);
+  aseSyncSliders();
+  aseSaveLs();
+  if (ASE_LAB.live === false && aseBake) aseOverlayFromBake();
+  else redraw();
+}
+
+function aseHudFromX(row, x) {
+  if (!row.trackW) return 0;
+  return aseClamp((x - row.trackX) / row.trackW, 0, 1, 0);
+}
+
+function aseHudPick(x, y) {
+  const g = aseHudGeom();
+  const b = g.btn;
+  if (
+    aseHudInside(
+      { x: b.x - 6, y: b.y - 6, w: b.w + 12, h: b.h + 12 },
+      x,
+      y
+    )
+  ) {
+    return { type: "seed" };
+  }
+  if (g.count && aseHudInside(g.count.hit, x, y)) {
+    return { type: "slide", row: g.count };
+  }
+  for (let i = 0; i < g.rows.length; i++) {
+    if (aseHudInside(g.rows[i].hit, x, y)) {
+      return { type: "slide", row: g.rows[i] };
+    }
+  }
+  return null;
+}
+
 function aseDrawCaption() {
   noStroke();
   fill(40, 120);
@@ -1898,6 +2499,10 @@ function aseDrawCaption() {
   text(
     "asemic · " +
       aseLayoutCaption() +
+      " · 線數 " +
+      aseLayoutN() +
+      " · 粗度 " +
+      Number(ASE_LAB.swMul == null ? 1 : ASE_LAB.swMul).toFixed(2) +
       " · 線／葉 " +
       ASE_LAB.leafShare.toFixed(2) +
       " · 葉長 " +
@@ -1927,6 +2532,7 @@ function aseOverlayFromBake() {
   image(aseBake, 0, 0, ASE_W, ASE_H);
   aseDrawPathGuides(aseBakePaths);
   aseDrawCaption();
+  aseDrawHud();
 }
 
 function asePaint() {
@@ -1978,6 +2584,7 @@ function asePaint() {
   aseBakePaths = paths;
   aseDrawPathGuides(paths);
   aseDrawCaption();
+  aseDrawHud();
 }
 
 function aseBindRange(id, valId, key, lo, hi, digits) {
@@ -2052,15 +2659,18 @@ function wireAseFloatUi() {
   aseBindRange("lab-leaf-dens", "lab-leaf-dens-v", "leafDens", 1, 2, 2);
   aseBindRange("lab-leaf-sw", "lab-leaf-sw-v", "leafSw", 0.5, 6, 2);
   aseBindRange("lab-line-sw", "lab-line-sw-v", "lineSw", 0.5, 6, 2);
+  aseBindRange("lab-sw-mul", "lab-sw-mul-v", "swMul", 0.5, 5, 2);
   aseBindRange("lab-leaf-tri", null, "leafTri", 0, 1, 2);
   aseBindRange("lab-leaf-vein", null, "leafVein", 0, 1, 2);
   aseBindRange("lab-leaf-off", "lab-leaf-off-v", "leafOff", -1, 1, 2);
   aseBindRange("lab-leaf-pad", null, "leafPad", 0, 1, 2);
+  aseBindRange("lab-line-n", "lab-line-n-v", "lineN", 2, 70, null);
   aseBindRange("lab-grid", "lab-grid-v", "gridT", 0, 1, 2);
   aseBindRange("lab-conc", "lab-conc-v", "concT", 0, 1, 2);
   aseBindRange("lab-bar", "lab-bar-v", "barT", 0, 1, 2);
   aseBindRange("lab-branch", "lab-branch-v", "branchT", 0, 1, 2);
   aseBindRange("lab-star", "lab-star-v", "starT", 0, 1, 2);
+  aseBindRange("lab-thread", "lab-thread-v", "threadT", 0, 1, 2);
 
   const pathEl = document.getElementById("lab-path");
   if (pathEl) {
@@ -2194,8 +2804,85 @@ function mousePressed() {
   if (mouseButton !== LEFT) return;
   const t = typeof event !== "undefined" && event && event.target;
   if (t && t.closest && t.closest("#pen-float")) return;
+  const hit = aseHudPick(mouseX, mouseY);
+  if (hit) {
+    if (hit.type === "seed") {
+      aseHudDrag = null;
+      aseHudPress = true;
+      if (aseBake) aseOverlayFromBake();
+      setTimeout(() => {
+        aseNewSeed();
+        redraw();
+      }, 40);
+      return;
+    }
+    aseHudDrag = hit.row.key;
+    aseHudApplyRow(hit.row, mouseX);
+    return;
+  }
+  aseHudDrag = null;
   aseNewSeed();
   redraw();
+}
+
+function mouseDragged() {
+  if (!aseHudDrag) return;
+  const g = aseHudGeom();
+  if (g.count && g.count.key === aseHudDrag) {
+    aseHudApplyRow(g.count, mouseX);
+    return;
+  }
+  for (let i = 0; i < g.rows.length; i++) {
+    if (g.rows[i].key === aseHudDrag) {
+      aseHudApplyRow(g.rows[i], mouseX);
+      break;
+    }
+  }
+}
+
+function mouseReleased() {
+  aseHudDrag = null;
+  if (aseHudPress) {
+    aseHudPress = false;
+    if (aseBake) aseOverlayFromBake();
+  }
+}
+
+function aseHudHoverSync() {
+  const hit = aseHudPick(mouseX, mouseY);
+  const nextSeed = !!(hit && hit.type === "seed");
+  let nextThumb = null;
+  if (hit && hit.type === "slide") {
+    const row = hit.row;
+    const t = aseHudRowT(row);
+    const p = aseHudAt(
+      row.trackX,
+      row.trackY,
+      row.trackX + row.trackW,
+      row.trackY,
+      row.trackSalt,
+      36,
+      1.1,
+      3.4,
+      t
+    );
+    if (Math.hypot(mouseX - p.x, mouseY - p.y) < 18) nextThumb = row.key;
+  }
+  if (nextSeed === aseHudHover && nextThumb === aseHudThumbHover) return;
+  aseHudHover = nextSeed;
+  aseHudThumbHover = nextThumb;
+  if (aseBake) aseOverlayFromBake();
+}
+
+function mouseMoved() {
+  aseHudHoverSync();
+}
+
+function mouseOut() {
+  if (!aseHudHover && !aseHudThumbHover) return;
+  aseHudHover = false;
+  aseHudThumbHover = null;
+  if (aseBake) aseOverlayFromBake();
 }
 
 function keyPressed() {

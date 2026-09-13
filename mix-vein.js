@@ -95,7 +95,7 @@ const MixVein = (() => {
     o.leafTri = clamp(o.leafTri, 0, 1, DEFAULTS.leafTri);
     o.leafSw = clamp(o.leafSw, 0.5, 6, DEFAULTS.leafSw);
     o.lineSw = clamp(o.lineSw, 0.5, 6, DEFAULTS.lineSw);
-    o.swMul = clamp(o.swMul, 0.1, 4, DEFAULTS.swMul);
+    o.swMul = clamp(o.swMul, 0.5, 5, DEFAULTS.swMul);
     o.showPath = !!o.showPath;
     o.salt = Number(o.salt);
     if (!Number.isFinite(o.salt)) o.salt = 0;

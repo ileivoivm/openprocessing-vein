@@ -3,14 +3,14 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Asemic Vein</title>
+    <title>Asemic Vein · Thread</title>
     <script src="https://cdn.jsdelivr.net/npm/p5@1.7.0/lib/p5.min.js"></script>
     <link rel="stylesheet" href="style.css" />
   </head>
   <body>
-    <aside id="pen-float" aria-label="Asemic Vein">
+    <aside id="pen-float" aria-label="Asemic Vein Thread">
       <div class="float-head">
-        <h1>Asemic Vein</h1>
+        <h1>Asemic Vein · Thread</h1>
         <button
           type="button"
           class="icon"
@@ -22,6 +22,7 @@
       </div>
       <div class="float-body">
         <h2>造型路徑</h2>
+        <p class="note">開啟的造型各自舊線跑到新線，時間由 morph 滑桿控制。</p>
         <div class="layout-slides">
           <label class="slide">
             <span>線條數量</span>
@@ -36,76 +37,42 @@
             <span class="val" id="lab-line-n-v">40</span>
           </label>
           <label class="slide">
-            <span>grid</span>
+            <span>morph 時間</span>
             <input
-              id="lab-grid"
+              id="lab-morph-sec"
               type="range"
-              min="0"
-              max="1"
-              step="0.01"
-              value="1"
+              min="0.5"
+              max="6"
+              step="0.1"
+              value="2.2"
             />
-            <span class="val" id="lab-grid-v">1.00</span>
+            <span class="val" id="lab-morph-sec-v">2.20</span>
           </label>
-          <label class="slide">
-            <span>concentric</span>
-            <input
-              id="lab-conc"
-              type="range"
-              min="0"
-              max="1"
-              step="0.01"
-              value="0"
-            />
-            <span class="val" id="lab-conc-v">0.00</span>
+        </div>
+        <div class="layout-togs">
+          <label class="tog">
+            <input id="lab-grid" type="checkbox" />
+            grid
           </label>
-          <label class="slide">
-            <span>barcode</span>
-            <input
-              id="lab-bar"
-              type="range"
-              min="0"
-              max="1"
-              step="0.01"
-              value="0"
-            />
-            <span class="val" id="lab-bar-v">0.00</span>
+          <label class="tog">
+            <input id="lab-conc" type="checkbox" />
+            concentric
           </label>
-          <label class="slide">
-            <span>branch</span>
-            <input
-              id="lab-branch"
-              type="range"
-              min="0"
-              max="1"
-              step="0.01"
-              value="0"
-            />
-            <span class="val" id="lab-branch-v">0.00</span>
+          <label class="tog">
+            <input id="lab-bar" type="checkbox" />
+            barcode
           </label>
-          <label class="slide">
-            <span>stars</span>
-            <input
-              id="lab-star"
-              type="range"
-              min="0"
-              max="1"
-              step="0.01"
-              value="0"
-            />
-            <span class="val" id="lab-star-v">0.00</span>
+          <label class="tog">
+            <input id="lab-branch" type="checkbox" />
+            branch
           </label>
-          <label class="slide">
-            <span>thread</span>
-            <input
-              id="lab-thread"
-              type="range"
-              min="0"
-              max="1"
-              step="0.01"
-              value="0"
-            />
-            <span class="val" id="lab-thread-v">0.00</span>
+          <label class="tog">
+            <input id="lab-star" type="checkbox" />
+            stars
+          </label>
+          <label class="tog">
+            <input id="lab-thread" type="checkbox" checked />
+            thread
           </label>
         </div>
         <div class="togs">
@@ -317,5 +284,6 @@
     </aside>
     <script src="mix-vein.js?v=sw26"></script>
     <script src="sketch2.js?v=sw99"></script>
+    <script src="sketch3.js?v=t12"></script>
   </body>
 </html>
