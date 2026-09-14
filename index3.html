@@ -22,7 +22,7 @@
       </div>
       <div class="float-body">
         <h2>造型路徑</h2>
-        <p class="note">開啟的造型各自舊線跑到新線，時間由 morph 滑桿控制。</p>
+        <p class="note">開啟的造型各自舊線跑到新線。滑桿是單條移動時間；每條另抽 0～一半延遲與 ease（quad / cubic / quart / quint / sine / expo / circ / bounce / elastic），全部跑完約 1.5 倍時間。</p>
         <div class="layout-slides">
           <label class="slide">
             <span>線條數量</span>
@@ -188,6 +188,30 @@
             <span class="val" id="lab-sw-mul-v">1.00</span>
           </label>
           <label class="slide">
+            <span>全體長度</span>
+            <input
+              id="lab-path-len"
+              type="range"
+              min="0.2"
+              max="2"
+              step="0.05"
+              value="1"
+            />
+            <span class="val" id="lab-path-len-v">1.00</span>
+          </label>
+          <label class="slide">
+            <span>鉛筆明度</span>
+            <input
+              id="lab-pencil-lum"
+              type="range"
+              min="0"
+              max="2"
+              step="0.05"
+              value="1"
+            />
+            <span class="val" id="lab-pencil-lum-v">1.00</span>
+          </label>
+          <label class="slide">
             <span>葉子線寬</span>
             <input
               id="lab-leaf-sw"
@@ -274,6 +298,10 @@
           <span>鉛筆質感</span>
         </label>
         <label class="row-check">
+          <input id="lab-analog" type="checkbox" />
+          <span>類比</span>
+        </label>
+        <label class="row-check">
           <input id="lab-white" type="checkbox" checked />
           <span>白色</span>
         </label>
@@ -291,7 +319,9 @@
       </div>
     </aside>
     <script src="mix-vein.js?v=sw26"></script>
-    <script src="sketch2.js?v=sw110"></script>
-    <script src="sketch3.js?v=t17"></script>
+    <script src="paper.js?v=a1"></script>
+    <script src="silk.js?v=a1"></script>
+    <script src="sketch2.js?v=sw114"></script>
+    <script src="sketch3.js?v=t28"></script>
   </body>
 </html>

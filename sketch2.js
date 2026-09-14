@@ -78,8 +78,11 @@ const ASE_LAB = Object.assign({}, MixVein.DEFAULTS, {
   threadT: 0,
   kleeT: 0,
   lineN: ASE_LAYOUT_N,
+  pathLen: 1,
   white: true,
   randColor: false,
+  analog: false,
+  pencilLum: 1,
 });
 
 let aseSeed = 1;
@@ -104,6 +107,20 @@ function aseClamp(n, lo, hi, fallback) {
   if (!Number.isFinite(x)) return fallback;
   return Math.max(lo, Math.min(hi, x));
 }
+
+function aseFillPaper() {
+  background(ASE_PAPER[0], ASE_PAPER[1], ASE_PAPER[2]);
+}
+
+function aseBeginBrushLayer() {}
+
+function aseEndBrushLayer() {}
+
+function asePencilPadRgb() {
+  return ASE_PAPER;
+}
+
+function aseCompositeAnalog() {}
 
 function aseLayoutN() {
   return Math.round(aseClamp(ASE_LAB.lineN, 2, 70, ASE_LAYOUT_N));
@@ -144,11 +161,14 @@ function aseApplyPreset(o) {
   if (o.leafSw != null) ASE_LAB.leafSw = aseClamp(o.leafSw, 0.5, 6, 1);
   if (o.lineSw != null) ASE_LAB.lineSw = aseClamp(o.lineSw, 0.5, 6, 1);
   if (o.swMul != null) ASE_LAB.swMul = aseClamp(o.swMul, 0.5, 5, 1);
+  if (o.pathLen != null) ASE_LAB.pathLen = aseClamp(o.pathLen, 0.2, 2, 1);
   if (typeof o.showPath === "boolean") ASE_LAB.showPath = o.showPath;
   if (typeof o.randPath === "boolean") ASE_LAB.randPath = o.randPath;
   if (typeof o.pencil === "boolean") ASE_LAB.pencil = o.pencil;
   if (typeof o.live === "boolean") ASE_LAB.live = o.live;
   if (typeof o.white === "boolean") ASE_LAB.white = o.white;
+  if (typeof o.analog === "boolean") ASE_LAB.analog = o.analog;
+  if (o.pencilLum != null) ASE_LAB.pencilLum = aseClamp(o.pencilLum, 0, 2, 1);
   if (typeof o.randColor === "boolean") ASE_LAB.randColor = o.randColor;
   if (typeof o.nonlinear === "boolean") ASE_LAB.nonlinear = o.nonlinear;
   if (typeof o.brush === "boolean") ASE_LAB.brush = o.brush;
@@ -322,6 +342,8 @@ function asePresetObject() {
     leafSw: +Number(ASE_LAB.leafSw).toFixed(2),
     lineSw: +Number(ASE_LAB.lineSw).toFixed(2),
     swMul: +Number(ASE_LAB.swMul == null ? 1 : ASE_LAB.swMul).toFixed(2),
+    pathLen: +Number(ASE_LAB.pathLen == null ? 1 : ASE_LAB.pathLen).toFixed(2),
+    pencilLum: +Number(ASE_LAB.pencilLum == null ? 1 : ASE_LAB.pencilLum).toFixed(2),
     gridT: +Number(ASE_LAB.gridT || 0).toFixed(2),
     concT: +Number(ASE_LAB.concT || 0).toFixed(2),
     barT: +Number(ASE_LAB.barT || 0).toFixed(2),
@@ -362,6 +384,10 @@ function aseSyncSliders() {
   setText("lab-line-sw-v", Number(ASE_LAB.lineSw).toFixed(2));
   set("lab-sw-mul", ASE_LAB.swMul == null ? 1 : ASE_LAB.swMul);
   setText("lab-sw-mul-v", Number(ASE_LAB.swMul == null ? 1 : ASE_LAB.swMul).toFixed(2));
+  set("lab-path-len", ASE_LAB.pathLen == null ? 1 : ASE_LAB.pathLen);
+  setText("lab-path-len-v", Number(ASE_LAB.pathLen == null ? 1 : ASE_LAB.pathLen).toFixed(2));
+  set("lab-pencil-lum", ASE_LAB.pencilLum == null ? 1 : ASE_LAB.pencilLum);
+  setText("lab-pencil-lum-v", Number(ASE_LAB.pencilLum == null ? 1 : ASE_LAB.pencilLum).toFixed(2));
   set("lab-leaf-vein", ASE_LAB.leafVein);
   set("lab-leaf-tri", ASE_LAB.leafTri);
   set("lab-leaf-off", ASE_LAB.leafOff);
@@ -383,6 +409,8 @@ function aseSyncSliders() {
   if (whiteEl) whiteEl.checked = ASE_LAB.white !== false;
   const randColorEl = document.getElementById("lab-rand-color");
   if (randColorEl) randColorEl.checked = !!ASE_LAB.randColor;
+  const analogEl = document.getElementById("lab-analog");
+  if (analogEl) analogEl.checked = !!ASE_LAB.analog;
   set("lab-grid", ASE_LAB.gridT || 0);
   setText("lab-grid-v", Number(ASE_LAB.gridT || 0).toFixed(2));
   set("lab-conc", ASE_LAB.concT || 0);
@@ -685,7 +713,8 @@ function aseBeginPencil() {
   tempPg.rect(-hw, -hh, ASE_W, ASE_H);
   tempPg.resetShader();
   img = tempPg.get();
-  strokePg.background(ASE_PAPER[0], ASE_PAPER[1], ASE_PAPER[2]);
+  const pad = asePencilPadRgb();
+  strokePg.background(pad[0], pad[1], pad[2]);
   strokePg.noStroke();
   strokePg.fill(255);
   if (strokePg.textureWrap) strokePg.textureWrap(REPEAT);
@@ -793,15 +822,17 @@ function drawStroke(pts, width, tex, color, dens, widths) {
 
 function aseEndPencil() {
   if (!strokePg) return;
-  background(ASE_PAPER[0], ASE_PAPER[1], ASE_PAPER[2]);
+  aseFillPaper();
   aseNoSmooth(drawingContext);
   const snap = strokePg.get();
   aseNoSmooth(drawingContext);
+  aseBeginBrushLayer();
   push();
   translate(0, ASE_H);
   scale(1, -1);
   image(snap, 0, 0, ASE_W, ASE_H);
   pop();
+  aseEndBrushLayer();
 }
 
 function aseHobbsNoise(a, salt, freq) {
@@ -2560,6 +2591,49 @@ function aseLayoutWeight(key) {
   return aseClamp(ASE_LAB[key], 0, 1, 0);
 }
 
+function asePathLenMul() {
+  return aseClamp(ASE_LAB.pathLen, 0.2, 2, 1);
+}
+
+function aseScalePathAboutCenter(path, mul) {
+  if (!path || !path.pts || path.pts.length < 2) return path;
+  if (!Number.isFinite(mul) || Math.abs(mul - 1) < 1e-6) return path;
+  const pts = path.pts;
+  let cx = 0;
+  let cy = 0;
+  for (let i = 0; i < pts.length; i++) {
+    cx += pts[i].x;
+    cy += pts[i].y;
+  }
+  cx /= pts.length;
+  cy /= pts.length;
+  const next = [];
+  for (let i = 0; i < pts.length; i++) {
+    next.push({
+      x: cx + (pts[i].x - cx) * mul,
+      y: cy + (pts[i].y - cy) * mul,
+    });
+  }
+  const out = Object.assign({}, path, { pts: next });
+  if (path.hub && Number.isFinite(path.hub.x)) {
+    out.hub = {
+      x: cx + (path.hub.x - cx) * mul,
+      y: cy + (path.hub.y - cy) * mul,
+    };
+  }
+  return out;
+}
+
+function aseApplyPathLen(paths) {
+  const mul = asePathLenMul();
+  if (!paths || !paths.length || Math.abs(mul - 1) < 1e-6) return paths;
+  const out = [];
+  for (let i = 0; i < paths.length; i++) {
+    out.push(aseScalePathAboutCenter(paths[i], mul));
+  }
+  return out;
+}
+
 /** 同一條線在七套造型間插值；只開一端則用該端原路徑。 */
 function aseCollectPaths() {
   const pack = aseEnsureMorphCache();
@@ -2578,15 +2652,17 @@ function aseCollectPaths() {
     (wS > 1e-6 ? 1 : 0) +
     (wT > 1e-6 ? 1 : 0) +
     (wK > 1e-6 ? 1 : 0);
-  if (live === 0) return [];
-  if (live === 1 && wG >= 1) return pack.grid;
-  if (live === 1 && wC >= 1) return pack.conc;
-  if (live === 1 && wB >= 1) return pack.bars;
-  if (live === 1 && wR >= 1) return pack.branches;
-  if (live === 1 && wS >= 1) return pack.stars;
-  if (live === 1 && wT >= 1) return pack.threads;
-  if (live === 1 && wK >= 1) return pack.klees;
-  return aseMorphBundles(pack.bundles, pack, aseMorphWeights());
+  let paths = [];
+  if (live === 0) paths = [];
+  else if (live === 1 && wG >= 1) paths = pack.grid;
+  else if (live === 1 && wC >= 1) paths = pack.conc;
+  else if (live === 1 && wB >= 1) paths = pack.bars;
+  else if (live === 1 && wR >= 1) paths = pack.branches;
+  else if (live === 1 && wS >= 1) paths = pack.stars;
+  else if (live === 1 && wT >= 1) paths = pack.threads;
+  else if (live === 1 && wK >= 1) paths = pack.klees;
+  else paths = aseMorphBundles(pack.bundles, pack, aseMorphWeights());
+  return aseApplyPathLen(paths);
 }
 
 function aseLayoutCaption() {
@@ -2680,21 +2756,35 @@ function asePickInkPalette(u) {
   return ASE_INK_PALETTE[i];
 }
 
+function asePencilLum() {
+  return aseClamp(ASE_LAB.pencilLum, 0, 2, 1);
+}
+
 function aseInkColor(stroke) {
+  let c;
   if (ASE_LAB.randColor) {
     const salt = Number(stroke && stroke.pathSalt);
     const id = Number.isFinite(salt) ? salt : Number(stroke && stroke.sw) || 0;
-    const c = asePickInkPalette(aseRng(aseHashSeed(aseSeed, id + 11.3))());
-    return color(c[0], c[1], c[2]);
-  }
-  if (stroke && stroke.accent && ASE_LAB.white !== false) return color(255);
-  if (ASE_LAB.pencil) {
+    const rgb = asePickInkPalette(aseRng(aseHashSeed(aseSeed, id + 11.3))());
+    c = color(rgb[0], rgb[1], rgb[2]);
+  } else if (stroke && stroke.accent && ASE_LAB.white !== false) {
+    c = color(255);
+  } else if (ASE_LAB.pencil) {
     const salt = Number(stroke && stroke.pathSalt);
     const id = Number.isFinite(salt) ? salt : Number(stroke && stroke.sw) || 0;
     const mul = 0.5 + aseRng(aseHashSeed(aseSeed, id + 4.9))() * 0.5;
-    return color(30 * mul, 110 * mul, 230 * mul);
+    c = color(30 * mul, 110 * mul, 230 * mul);
+  } else {
+    c = color(50);
   }
-  return color(50);
+  if (!ASE_LAB.pencil) return c;
+  const n = asePencilLum();
+  if (Math.abs(n - 1) < 1e-6) return c;
+  return color(
+    constrain(red(c) * n, 0, 255),
+    constrain(green(c) * n, 0, 255),
+    constrain(blue(c) * n, 0, 255)
+  );
 }
 
 function asePaintPencilPath(stroke) {
@@ -2726,6 +2816,7 @@ function asePaintPencilPath(stroke) {
 
 function asePaintInkAccents(strokes) {
   if (!strokes || !strokes.length) return;
+  aseBeginBrushLayer();
   push();
   aseFlip2D();
   noFill();
@@ -2744,10 +2835,12 @@ function asePaintInkAccents(strokes) {
     }
   }
   pop();
+  aseEndBrushLayer();
 }
 
 function asePaintInkStrokes(strokes) {
-  background(ASE_PAPER[0], ASE_PAPER[1], ASE_PAPER[2]);
+  aseFillPaper();
+  aseBeginBrushLayer();
   push();
   aseFlip2D();
   noFill();
@@ -2766,6 +2859,7 @@ function asePaintInkStrokes(strokes) {
     }
   }
   pop();
+  aseEndBrushLayer();
 }
 
 function aseDrawPathGuides(paths) {
@@ -3147,7 +3241,7 @@ function asePaint() {
   const paths = aseCollectPaths();
   const showBrush = ASE_LAB.brush !== false;
   if (!showBrush) {
-    background(ASE_PAPER[0], ASE_PAPER[1], ASE_PAPER[2]);
+    aseFillPaper();
   } else {
   const wantPencil = !!ASE_LAB.pencil;
   const strokes = [];
@@ -3195,6 +3289,7 @@ function asePaint() {
       if (ASE_LAB.white !== false) asePaintInkAccents(strokes);
     }
   }
+  aseCompositeAnalog();
   aseBake = get();
   aseBakePaths = paths;
   aseDrawPathGuides(paths);
@@ -3275,6 +3370,8 @@ function wireAseFloatUi() {
   aseBindRange("lab-leaf-sw", "lab-leaf-sw-v", "leafSw", 0.5, 6, 2);
   aseBindRange("lab-line-sw", "lab-line-sw-v", "lineSw", 0.5, 6, 2);
   aseBindRange("lab-sw-mul", "lab-sw-mul-v", "swMul", 0.5, 5, 2);
+  aseBindRange("lab-pencil-lum", "lab-pencil-lum-v", "pencilLum", 0, 2, 2);
+  aseBindRange("lab-path-len", "lab-path-len-v", "pathLen", 0.2, 2, 2);
   aseBindRange("lab-leaf-tri", null, "leafTri", 0, 1, 2);
   aseBindRange("lab-leaf-vein", null, "leafVein", 0, 1, 2);
   aseBindRange("lab-leaf-off", "lab-leaf-off-v", "leafOff", -1, 1, 2);

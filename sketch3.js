@@ -25,6 +25,7 @@ const ASE3_HUD_TOGS = [
 const ASE3_MORPH_LO = 0.5;
 const ASE3_MORPH_HI = 6;
 const ASE3_MORPH_DEF = 2.2;
+const ASE3_FADE_MS = 1000;
 
 let ase3SeedA = 1;
 let ase3SeedB = 2;
@@ -38,12 +39,87 @@ let ase3HoldPaths = null;
 let ase3Paused = false;
 let ase3PauseAt = 0;
 let ase3StyleByKey = {};
+let ase3LiveW = {};
+let ase3Fade = {};
 
 const ase3BaseNewSeed = aseNewSeed;
+const ase3BaseWeight = aseLayoutWeight;
 const ase3BaseCollect = aseCollectPaths;
 const ase3BaseSync = aseSyncSliders;
 const ase3BaseBind = aseBindRange;
 const ase3BaseApply = aseApplyPreset;
+const ase3BaseMaybe = aseMaybeRedraw;
+
+aseMaybeRedraw = function () {
+  ase3HoldReady = false;
+  return ase3BaseMaybe();
+};
+
+let ase3PaperTex = null;
+let ase3SilkPg = null;
+let ase3SilkSeed = 0;
+let ase3SilkBakeN = 0;
+
+function ase3ClearSilk() {
+  ase3SilkSeed = 0;
+}
+
+function ase3EnsureAnalog() {
+  if (typeof PaperTexture === "undefined" || typeof Silk === "undefined") return;
+  if (!ase3PaperTex && typeof PaperTexture.bake === "function") {
+    ase3PaperTex = PaperTexture.bake({ w: ASE_W, h: ASE_H });
+  }
+  if (ase3SilkPg && ase3SilkSeed === aseSeed) return;
+  if (!ase3SilkPg) {
+    ase3SilkPg = createGraphics(ASE_W, ASE_H);
+    ase3SilkPg.pixelDensity(1);
+  }
+  ase3SilkPg.background(125);
+  Silk.paint(aseSeed, ase3SilkPg);
+  ase3SilkSeed = aseSeed;
+  ase3SilkBakeN++;
+}
+
+aseFillPaper = function () {
+  if (!ASE_LAB.analog) {
+    background(ASE_PAPER[0], ASE_PAPER[1], ASE_PAPER[2]);
+    return;
+  }
+  ase3EnsureAnalog();
+  background(ASE_PAPER[0], ASE_PAPER[1], ASE_PAPER[2]);
+  if (!ase3PaperTex) return;
+  push();
+  blendMode(MULTIPLY);
+  imageMode(CORNER);
+  image(ase3PaperTex, 0, 0, ASE_W, ASE_H);
+  pop();
+};
+
+asePencilPadRgb = function () {
+  return ASE_LAB.analog ? [255, 255, 255] : ASE_PAPER;
+};
+
+aseBeginBrushLayer = function () {
+  if (!ASE_LAB.analog) return;
+  push();
+  blendMode(MULTIPLY);
+};
+
+aseEndBrushLayer = function () {
+  if (!ASE_LAB.analog) return;
+  pop();
+};
+
+aseCompositeAnalog = function () {
+  if (!ASE_LAB.analog) return;
+  ase3EnsureAnalog();
+  if (!ase3SilkPg) return;
+  push();
+  blendMode(OVERLAY);
+  imageMode(CORNER);
+  // image(ase3SilkPg, 0, 0, ASE_W, ASE_H);//絲紋
+  pop();
+};
 
 function aseSaveLs() {
   try {
@@ -59,6 +135,7 @@ function aseSaveLs() {
           randColor: !!ASE_LAB.randColor,
           nonlinear: !!ASE_LAB.nonlinear,
           brush: ASE_LAB.brush !== false,
+          analog: !!ASE_LAB.analog,
           morphSec: ase3MorphSec(),
         })
       )
@@ -72,7 +149,15 @@ aseApplyPreset = function (o) {
     ASE_LAB.morphSec = aseClamp(o.morphSec, ASE3_MORPH_LO, ASE3_MORPH_HI, ASE3_MORPH_DEF);
   }
   ase3SnapToggles();
+  ase3InitLive();
   return ok;
+};
+
+aseLayoutWeight = function (key) {
+  if (Object.prototype.hasOwnProperty.call(ase3LiveW, key)) {
+    return aseClamp(ase3LiveW[key], 0, 1, 0);
+  }
+  return ase3BaseWeight(key);
 };
 
 function ase3MorphSec() {
@@ -81,6 +166,100 @@ function ase3MorphSec() {
 
 function ase3MorphMs() {
   return ase3MorphSec() * 1000;
+}
+
+function ase3DelayMs() {
+  return ase3MorphMs() * 0.5;
+}
+
+function ase3CycleMs() {
+  return ase3MorphMs() + ase3DelayMs();
+}
+
+const ASE3_EASES = [
+  "quad",
+  "cubic",
+  "quart",
+  "quint",
+  "sine",
+  "expo",
+  "circ",
+  // "bounce",
+  "elastic",
+];
+
+function ase3BounceOut(x) {
+  const n1 = 7.5625;
+  const d1 = 2.75;
+  if (x < 1 / d1) return n1 * x * x;
+  if (x < 2 / d1) {
+    const t = x - 1.5 / d1;
+    return n1 * t * t + 0.75;
+  }
+  if (x < 2.5 / d1) {
+    const t = x - 2.25 / d1;
+    return n1 * t * t + 0.9375;
+  }
+  const t = x - 2.625 / d1;
+  return n1 * t * t + 0.984375;
+}
+
+function ase3Ease(kind, t) {
+  const x = aseClamp(t, 0, 1, 0);
+  if (x <= 0) return 0;
+  if (x >= 1) return 1;
+  const inv = 2 - 2 * x;
+  switch (kind) {
+    case "quad":
+      return x < 0.5 ? 2 * x * x : 1 - (inv * inv) / 2;
+    case "quart": {
+      const x2 = x * x;
+      return x < 0.5 ? 8 * x2 * x2 : 1 - (inv * inv * inv * inv) / 2;
+    }
+    case "quint": {
+      const x2 = x * x;
+      return x < 0.5 ? 16 * x2 * x2 * x : 1 - (inv * inv * inv * inv * inv) / 2;
+    }
+    case "sine":
+      return -(Math.cos(Math.PI * x) - 1) / 2;
+    case "expo":
+      return x < 0.5 ? Math.pow(2, 20 * x - 10) / 2 : (2 - Math.pow(2, -20 * x + 10)) / 2;
+    case "circ":
+      return x < 0.5
+        ? (1 - Math.sqrt(1 - 4 * x * x)) / 2
+        : (Math.sqrt(1 - inv * inv) + 1) / 2;
+    case "bounce":
+      return x < 0.5
+        ? (1 - ase3BounceOut(1 - 2 * x)) / 2
+        : (1 + ase3BounceOut(2 * x - 1)) / 2;
+    case "elastic": {
+      const c5 = (2 * Math.PI) / 4.5;
+      return x < 0.5
+        ? -(Math.pow(2, 20 * x - 10) * Math.sin((20 * x - 11.125) * c5)) / 2
+        : (Math.pow(2, -20 * x + 10) * Math.sin((20 * x - 11.125) * c5)) / 2 + 1;
+    }
+    case "cubic":
+    default:
+      return x < 0.5 ? 4 * x * x * x : 1 - (inv * inv * inv) / 2;
+  }
+}
+
+function ase3StampPairDelays(pairs, salt) {
+  const rng = aseRng(aseHashSeed(ase3SeedA, salt + 0.13 * (ase3SeedB >>> 0)));
+  for (let i = 0; i < pairs.length; i++) {
+    pairs[i].delayU = rng();
+    pairs[i].easeKind = ASE3_EASES[Math.floor(rng() * ASE3_EASES.length)];
+  }
+  return pairs;
+}
+
+function ase3PairLinear(pair, dt, morphMs) {
+  const delay = (pair && pair.delayU != null ? pair.delayU : 0) * morphMs * 0.5;
+  return aseClamp((dt - delay) / Math.max(1, morphMs), 0, 1, 0);
+}
+
+function ase3PairBlend(pair, dt, morphMs) {
+  return ase3Ease(pair && pair.easeKind, ase3PairLinear(pair, dt, morphMs));
 }
 
 function aseLoadLs() {
@@ -110,15 +289,63 @@ aseBindRange = function (id, valId, key, lo, hi, digits) {
 
 function ase3AnyLayout() {
   for (let i = 0; i < ASE3_LAYOUTS.length; i++) {
-    if (ASE_LAB[ASE3_LAYOUTS[i][1]] > 0.5) return true;
+    const key = ASE3_LAYOUTS[i][1];
+    if (ASE_LAB[key] > 0.5) return true;
+    if ((ase3LiveW[key] || 0) > 1e-4) return true;
   }
-  return false;
+  return ase3FadeBusy();
 }
 
 function ase3SnapToggles() {
   for (let i = 0; i < ASE3_LAYOUTS.length; i++) {
     const key = ASE3_LAYOUTS[i][1];
     ASE_LAB[key] = ASE_LAB[key] > 0.5 ? 1 : 0;
+  }
+}
+
+function ase3InitLive() {
+  for (let i = 0; i < ASE3_LAYOUTS.length; i++) {
+    const key = ASE3_LAYOUTS[i][1];
+    ase3LiveW[key] = ASE_LAB[key] > 0.5 ? 1 : 0;
+    ase3Fade[key] = null;
+  }
+}
+
+function ase3FadeBusy() {
+  for (let i = 0; i < ASE3_LAYOUTS.length; i++) {
+    if (ase3Fade[ASE3_LAYOUTS[i][1]]) return true;
+  }
+  return false;
+}
+
+function ase3ArmFade(key, on) {
+  const to = on ? 1 : 0;
+  const from = ase3LiveW[key] != null ? ase3LiveW[key] : ASE_LAB[key] > 0.5 ? 1 : 0;
+  ASE_LAB[key] = to;
+  if (Math.abs(from - to) < 1e-4) {
+    ase3LiveW[key] = to;
+    ase3Fade[key] = null;
+    return;
+  }
+  ase3Fade[key] = { from, to, t0: millis() };
+}
+
+function ase3TickFades() {
+  const now = millis();
+  for (let i = 0; i < ASE3_LAYOUTS.length; i++) {
+    const key = ASE3_LAYOUTS[i][1];
+    const f = ase3Fade[key];
+    if (!f) {
+      if (ase3LiveW[key] == null) ase3LiveW[key] = ASE_LAB[key] > 0.5 ? 1 : 0;
+      continue;
+    }
+    const t = aseClamp((now - f.t0) / ASE3_FADE_MS, 0, 1, 0);
+    const u = ase3Ease("quad", t);
+    ase3LiveW[key] = f.from + (f.to - f.from) * u;
+    if (t >= 1) {
+      ase3LiveW[key] = f.to;
+      ase3Fade[key] = null;
+    }
   }
 }
 
@@ -163,8 +390,7 @@ aseSyncSliders = function () {
 };
 
 function ase3FlipLayout(key) {
-  ASE_LAB[key] = ASE_LAB[key] > 0.5 ? 0 : 1;
-  ase3SnapToggles();
+  ase3ArmFade(key, ASE_LAB[key] <= 0.5);
   ase3SyncTogs();
   aseSaveLs();
   ase3HoldReady = false;
@@ -200,20 +426,19 @@ function ase3SyncPacks() {
   ase3PackFrom = ase3CollectPack(ase3SeedA);
   ase3PackTo = ase3CollectPack(ase3SeedB);
   ase3PackPairs = {
-    grid: aseMatchTwo(ase3PackFrom.grid, ase3PackTo.grid),
-    conc: aseMatchTwo(ase3PackFrom.conc, ase3PackTo.conc),
-    bars: aseMatchTwo(ase3PackFrom.bars, ase3PackTo.bars),
-    branches: aseMatchTwo(ase3PackFrom.branches, ase3PackTo.branches),
-    stars: aseMatchTwo(ase3PackFrom.stars, ase3PackTo.stars),
-    threads: aseMatchTwo(ase3PackFrom.threads, ase3PackTo.threads),
-    klees: aseMatchTwo(ase3PackFrom.klees, ase3PackTo.klees),
+    grid: ase3StampPairDelays(aseMatchTwo(ase3PackFrom.grid, ase3PackTo.grid), 11),
+    conc: ase3StampPairDelays(aseMatchTwo(ase3PackFrom.conc, ase3PackTo.conc), 23),
+    bars: ase3StampPairDelays(aseMatchTwo(ase3PackFrom.bars, ase3PackTo.bars), 37),
+    branches: ase3StampPairDelays(aseMatchTwo(ase3PackFrom.branches, ase3PackTo.branches), 53),
+    stars: ase3StampPairDelays(aseMatchTwo(ase3PackFrom.stars, ase3PackTo.stars), 71),
+    threads: ase3StampPairDelays(aseMatchTwo(ase3PackFrom.threads, ase3PackTo.threads), 97),
+    klees: ase3StampPairDelays(aseMatchTwo(ase3PackFrom.klees, ase3PackTo.klees), 113),
   };
 }
 
 function ase3Blend() {
   const dt = millis() - ase3CycleStart;
-  const u = aseClamp(dt / ase3MorphMs(), 0, 1, 0);
-  return u * u * (3 - 2 * u);
+  return aseClamp(dt / ase3CycleMs(), 0, 1, 0);
 }
 
 function ase3PathKey(p) {
@@ -255,26 +480,28 @@ function ase3CarryPath(path, salt) {
   };
 }
 
-function ase3LerpLayout(fromList, toList, pairs, u) {
+function ase3LerpLayout(fromList, toList, pairs, dt, morphMs) {
   const nonlinear = !!ASE_LAB.nonlinear;
   const out = [];
   for (let i = 0; i < pairs.length; i++) {
     const a = pairs[i].a;
     const b = pairs[i].b;
     const salt = ase3TakeStyleSalt(i, a, b);
-    if (u <= 1e-6 && a) {
+    const t = ase3PairLinear(pairs[i], dt, morphMs);
+    const u = ase3Ease(pairs[i].easeKind, t);
+    if (t <= 1e-6 && a) {
       out.push(ase3CarryPath(a, salt));
       continue;
     }
-    if (u >= 1 - 1e-6 && b) {
+    if (t >= 1 - 1e-6 && b) {
       out.push(ase3CarryPath(b, salt));
       continue;
     }
-    if (u <= 1e-6 && b) {
+    if (t <= 1e-6 && b) {
       out.push(ase3CarryPath(b, salt));
       continue;
     }
-    if (u >= 1 - 1e-6 && a) {
+    if (t >= 1 - 1e-6 && a) {
       out.push(ase3CarryPath(a, salt));
       continue;
     }
@@ -334,25 +561,28 @@ function ase3LerpLayout(fromList, toList, pairs, u) {
 
 function ase3LerpPack() {
   ase3SyncPacks();
-  const u = ase3Blend();
+  const dt = millis() - ase3CycleStart;
+  const morphMs = ase3MorphMs();
   return {
-    grid: ase3LerpLayout(ase3PackFrom.grid, ase3PackTo.grid, ase3PackPairs.grid, u),
-    conc: ase3LerpLayout(ase3PackFrom.conc, ase3PackTo.conc, ase3PackPairs.conc, u),
-    bars: ase3LerpLayout(ase3PackFrom.bars, ase3PackTo.bars, ase3PackPairs.bars, u),
+    grid: ase3LerpLayout(ase3PackFrom.grid, ase3PackTo.grid, ase3PackPairs.grid, dt, morphMs),
+    conc: ase3LerpLayout(ase3PackFrom.conc, ase3PackTo.conc, ase3PackPairs.conc, dt, morphMs),
+    bars: ase3LerpLayout(ase3PackFrom.bars, ase3PackTo.bars, ase3PackPairs.bars, dt, morphMs),
     branches: ase3LerpLayout(
       ase3PackFrom.branches,
       ase3PackTo.branches,
       ase3PackPairs.branches,
-      u
+      dt,
+      morphMs
     ),
-    stars: ase3LerpLayout(ase3PackFrom.stars, ase3PackTo.stars, ase3PackPairs.stars, u),
+    stars: ase3LerpLayout(ase3PackFrom.stars, ase3PackTo.stars, ase3PackPairs.stars, dt, morphMs),
     threads: ase3LerpLayout(
       ase3PackFrom.threads,
       ase3PackTo.threads,
       ase3PackPairs.threads,
-      u
+      dt,
+      morphMs
     ),
-    klees: ase3LerpLayout(ase3PackFrom.klees, ase3PackTo.klees, ase3PackPairs.klees, u),
+    klees: ase3LerpLayout(ase3PackFrom.klees, ase3PackTo.klees, ase3PackPairs.klees, dt, morphMs),
   };
 }
 
@@ -389,6 +619,7 @@ aseNewSeed = function (explicit) {
   ase3StyleByKey = {};
   ase3CycleStart = millis();
   ase3HoldReady = false;
+  ase3ClearSilk();
   ase3SyncPacks();
 };
 
@@ -398,7 +629,7 @@ function ase3Tick() {
     return;
   }
   ase3ResumeClock();
-  if (millis() - ase3CycleStart < ase3MorphMs()) return;
+  if (millis() - ase3CycleStart < ase3CycleMs()) return;
   ase3SeedA = ase3SeedB;
   ase3SeedB = aseHashSeed(ase3SeedB, 17.31 + (millis() % 100000)) || ase3SeedB + 1;
   if (ase3SeedB === ase3SeedA) ase3SeedB = (ase3SeedB + 97) >>> 0 || 2;
@@ -591,8 +822,7 @@ function ase3WireLayoutTogs() {
     if (!el) continue;
     el.checked = ASE_LAB[key] > 0.5;
     el.addEventListener("change", () => {
-      ASE_LAB[key] = el.checked ? 1 : 0;
-      ase3SnapToggles();
+      ase3ArmFade(key, !!el.checked);
       ase3SyncTogs();
       aseSaveLs();
       ase3HoldReady = false;
@@ -618,7 +848,19 @@ function setup() {
   ASE_LAB.morphSec = ASE3_MORPH_DEF;
   aseLoadLs();
   ase3SnapToggles();
+  ase3InitLive();
   wireAseFloatUi();
+  const analogEl = document.getElementById("lab-analog");
+  if (analogEl) {
+    analogEl.checked = !!ASE_LAB.analog;
+    analogEl.addEventListener("change", () => {
+      ASE_LAB.analog = !!analogEl.checked;
+      aseSaveLs();
+      ase3HoldReady = false;
+      if (ASE_LAB.analog) ase3EnsureAnalog();
+      if (ASE_LAB.live === false) redraw();
+    });
+  }
   aseBindRange("lab-morph-sec", "lab-morph-sec-v", "morphSec", ASE3_MORPH_LO, ASE3_MORPH_HI, 2);
   ase3WireLayoutTogs();
   ase3SyncTogs();
@@ -627,10 +869,12 @@ function setup() {
 }
 
 function draw() {
+  ase3TickFades();
   ase3Tick();
   const frozen = !ase3AnyLayout();
-  const morphing = !frozen && millis() - ase3CycleStart < ase3MorphMs();
-  if (morphing) ase3HoldReady = false;
+  const fading = ase3FadeBusy();
+  const morphing = !frozen && millis() - ase3CycleStart < ase3CycleMs();
+  if (morphing || fading) ase3HoldReady = false;
   randomSeed(aseSeed);
   noiseSeed(aseSeed);
   if (!frozen && !morphing && ase3HoldReady && aseBake) {
