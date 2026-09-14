@@ -136,6 +136,7 @@ function aseSaveLs() {
           nonlinear: !!ASE_LAB.nonlinear,
           brush: ASE_LAB.brush !== false,
           analog: !!ASE_LAB.analog,
+          showHud: ASE_LAB.showHud !== false,
           morphSec: ase3MorphSec(),
         })
       )
@@ -700,6 +701,10 @@ aseHudGeom = function () {
   return { count, rows: [morph, count], btn: null, togs };
 };
 
+function ase3HudVisible() {
+  return ASE_LAB.showHud !== false;
+}
+
 function ase3HudDrawTog(tog) {
   const on = ASE_LAB[tog.key] > 0.5;
   const hot = aseHudThumbHover === tog.key;
@@ -761,6 +766,7 @@ aseHudApplyRow = function (row, x) {
 aseDrawCaption = function () {};
 
 aseDrawHud = function () {
+  if (!ase3HudVisible()) return;
   const g = aseHudGeom();
   push();
   const togs = g.togs || [];
@@ -774,6 +780,7 @@ aseDrawHud = function () {
 };
 
 aseHudPick = function (x, y) {
+  if (!ase3HudVisible()) return null;
   const g = aseHudGeom();
   const togs = g.togs || [];
   for (let i = 0; i < togs.length; i++) {
@@ -847,6 +854,7 @@ function setup() {
   ASE_LAB.kleeT = 0;
   ASE_LAB.morphSec = ASE3_MORPH_DEF;
   aseLoadLs();
+  ASE_LAB.nonlinear = false;
   ase3SnapToggles();
   ase3InitLive();
   wireAseFloatUi();

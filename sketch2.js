@@ -36,15 +36,15 @@ const ASE_STAR_LEN = 120; // stars：放射線基準長
 const ASE_STAR_STEP = 4; // stars：每步長
 const ASE_STAR_NOISE = 0.025; // stars：Perlin 座標縮放
 //--------------------------------
-const ASE_THREAD_LEN = 2200; // thread：一條棉線總長
+const ASE_THREAD_LEN = 3200; // thread：一條棉線總長
 const ASE_THREAD_STEP = 3.0; // thread：每步長
 const ASE_THREAD_NOISE = 0.3; // thread：轉向雜訊
 //--------------------------------
 const ASE_KLEE_PAD = 14; // klee：短撇基準 margin
 const ASE_KLEE_LONG = 0.52; // klee：長弧佔比
 const ASE_KLEE_STEP = 5; // klee：長弧步長
-const ASE_KLEE_BOX_W = 500; // klee：置中畫框寬
-const ASE_KLEE_BOX_H = 500; // klee：置中畫框高
+const ASE_KLEE_BOX_W = 700; // klee：置中畫框寬
+const ASE_KLEE_BOX_H = 700; // klee：置中畫框高
 //--------------------------------
 const ASE_LAYOUT_N = 40; // 線條數量預設，滑桿 2–70
 const ASE_PENCIL_DENS = 3; // 鉛筆 texZoom，原滑桿下限
@@ -83,6 +83,7 @@ const ASE_LAB = Object.assign({}, MixVein.DEFAULTS, {
   randColor: false,
   analog: false,
   pencilLum: 1,
+  showHud: true,
 });
 
 let aseSeed = 1;
@@ -168,6 +169,7 @@ function aseApplyPreset(o) {
   if (typeof o.live === "boolean") ASE_LAB.live = o.live;
   if (typeof o.white === "boolean") ASE_LAB.white = o.white;
   if (typeof o.analog === "boolean") ASE_LAB.analog = o.analog;
+  if (typeof o.showHud === "boolean") ASE_LAB.showHud = o.showHud;
   if (o.pencilLum != null) ASE_LAB.pencilLum = aseClamp(o.pencilLum, 0, 2, 1);
   if (typeof o.randColor === "boolean") ASE_LAB.randColor = o.randColor;
   if (typeof o.nonlinear === "boolean") ASE_LAB.nonlinear = o.nonlinear;
@@ -403,6 +405,8 @@ function aseSyncSliders() {
   if (nonlinearEl) nonlinearEl.checked = !!ASE_LAB.nonlinear;
   const brushEl = document.getElementById("lab-brush");
   if (brushEl) brushEl.checked = ASE_LAB.brush !== false;
+  const hudEl = document.getElementById("lab-hud");
+  if (hudEl) hudEl.checked = ASE_LAB.showHud !== false;
   const liveEl = document.getElementById("lab-live");
   if (liveEl) liveEl.checked = ASE_LAB.live !== false;
   const whiteEl = document.getElementById("lab-white");
@@ -3421,6 +3425,16 @@ function wireAseFloatUi() {
     brushEl.checked = ASE_LAB.brush !== false;
     brushEl.addEventListener("change", () => {
       ASE_LAB.brush = !!brushEl.checked;
+      aseSaveLs();
+      redraw();
+    });
+  }
+
+  const hudEl = document.getElementById("lab-hud");
+  if (hudEl) {
+    hudEl.checked = ASE_LAB.showHud !== false;
+    hudEl.addEventListener("change", () => {
+      ASE_LAB.showHud = !!hudEl.checked;
       aseSaveLs();
       redraw();
     });
